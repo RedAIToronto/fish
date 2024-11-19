@@ -12,6 +12,9 @@ import os
 import anthropic
 from dotenv import load_dotenv
 import logging
+import json
+import aiofiles
+from datetime import datetime
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -228,7 +231,7 @@ class DevAIHelper:
                     None,
                     lambda: self.client.messages.create(
     model="claude-3-5-sonnet-20241022",
-                        max_tokens=200,
+                        max_tokens=400,
                         temperature=0.9,
                         system=self.report_prompt,
                         messages=[{
@@ -244,7 +247,7 @@ class DevAIHelper:
                     None,
                     lambda: self.client.messages.create(
     model="claude-3-5-sonnet-20241022",
-                        max_tokens=50,
+                        max_tokens=80,
                         temperature=0.9,
                         system=self.brief_prompt,
                         messages=[{
@@ -285,6 +288,10 @@ class FishSim:
         self.last_ai_call = 0
         self.min_ai_interval = 1.0
         self.ai_processor = None  # Will be initialized later
+        self.state_file = "fish_state.json"
+        self.load_state()  # Load saved state on startup
+        self.last_save_time = time.time()
+        self.save_interval = 30  # Save every 30 seconds
 
     async def start_ai_processor(self):
         """Start the AI processor as a background task"""
@@ -329,8 +336,75 @@ class FishSim:
                 logger.error(f"AI queue processing error: {e}")
                 await asyncio.sleep(1)  # Wait longer on error
 
+    async def save_state(self):
+        """Save current simulation state to file"""
+        state = {
+            'fish': [{
+                'x': f.x,
+                'y': f.y,
+                'vx': f.vx,
+                'vy': f.vy,
+                'energy': f.energy,
+                'color': f.color,
+                'size': f.size,
+            } for f in self.fish],
+            'food': self.food,
+            'timestamp': datetime.now().isoformat(),
+            'blob_fish': {
+                'x': self.blob_fish.x,
+                'y': self.blob_fish.y,
+                'last_thought': self.blob_fish.last_thought
+            }
+        }
+        
+        try:
+            async with aiofiles.open(self.state_file, 'w') as f:
+                await f.write(json.dumps(state))
+            logger.info("State saved successfully")
+        except Exception as e:
+            logger.error(f"Error saving state: {e}")
+
+    def load_state(self):
+        """Load simulation state from file"""
+        try:
+            if os.path.exists(self.state_file):
+                with open(self.state_file, 'r') as f:
+                    state = json.loads(f.read())
+                
+                # Recreate fish from saved state
+                self.fish = [Fish(
+                    x=f['x'],
+                    y=f['y'],
+                    vx=f['vx'],
+                    vy=f['vy'],
+                    energy=f['energy'],
+                    color=f['color'],
+                    size=f['size']
+                ) for f in state['fish']]
+                
+                # Restore food
+                self.food = state['food']
+                
+                # Restore blob fish position
+                if 'blob_fish' in state:
+                    self.blob_fish.x = state['blob_fish']['x']
+                    self.blob_fish.y = state['blob_fish']['y']
+                
+                logger.info(f"State loaded from {state['timestamp']}")
+        except Exception as e:
+            logger.error(f"Error loading state: {e}")
+            # Initialize with default values if load fails
+            self.fish = [Fish(random.uniform(0, self.width), random.uniform(0, self.height))
+                        for _ in range(15)]
+            self.food = []
+
     async def update(self):
         current_time = time.time()
+        
+        # Save state periodically
+        if current_time - self.last_save_time > self.save_interval:
+            await self.save_state()
+            self.last_save_time = current_time
         
         # Queue blob fish thoughts less frequently
         if (current_time - self.last_blob_thought_time > 8 and 
@@ -484,31 +558,51 @@ async def shutdown_event():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    logger.info("New WebSocket connection accepted")
+    
+    try:
+        async def simulation_loop():
+            while True:
+                try:
+                    code_updates = await sim.update()
+                    state = await sim.get_state()
+                    logger.debug(f"Sending state with {len(state['fish'])} fish")
+                    await websocket.send_json(state)
+                    await asyncio.sleep(0.05)
+                except Exception as e:
+                    logger.error(f"Simulation loop error: {e}")
+                    break
 
-    async def simulation_loop():
-        while True:
-            code_updates = await sim.update()
-            state = await sim.get_state()
-            await websocket.send_json(state)
-            await asyncio.sleep(0.05)
+        async def receive_loop():
+            while True:
+                try:
+                    data = await websocket.receive_json()
+                    if data['type'] == 'add_food':
+                        sim.food.append({
+                            'x': data['x'],
+                            'y': data['y'],
+                            'energy': 30
+                        })
+                    elif data['type'] == 'ai_query':
+                        response = await sim.handle_ai_command(data['message'])
+                        await websocket.send_json({
+                            'type': 'ai_response',
+                            'message': response
+                        })
+                except WebSocketDisconnect:
+                    logger.info("Client disconnected normally")
+                    break
+                except Exception as e:
+                    logger.error(f"Receive loop error: {e}")
+                    break
 
-    async def receive_loop():
-        while True:
-            data = await websocket.receive_json()
-            if data['type'] == 'add_food':
-                sim.food.append({
-                    'x': data['x'],
-                    'y': data['y'],
-                    'energy': 30
-                })
-            elif data['type'] == 'ai_query':
-                response = await sim.handle_ai_command(data['message'])
-                await websocket.send_json({
-                    'type': 'ai_response',
-                    'message': response
-                })
-
-    await asyncio.gather(simulation_loop(), receive_loop())
+        await asyncio.gather(simulation_loop(), receive_loop())
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        logger.info("Cleaning up WebSocket connection")
 
 if __name__ == "__main__":
     import uvicorn

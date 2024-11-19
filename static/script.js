@@ -2,10 +2,144 @@ const canvas = document.getElementById('fishTank');
 const ctx = canvas.getContext('2d');
 const thoughtLog = document.getElementById('thoughtLog');
 const MAX_THOUGHTS = 3;
-const ws = new WebSocket(`ws://${window.location.host}/ws`);
 const SPAWN_EFFECTS = new Map();  // Store spawn effects
 const DEATH_EFFECTS = new Map();  // Store death effects
 const EFFECT_DURATION = 1000;  // Effect duration in ms
+
+// Initialize variables for tracking fish
+let previousFishIds = new Set();
+let thoughtCache = new Map();
+const THOUGHT_CACHE_DURATION = 5000;
+
+// WebSocket connection handling
+let ws;
+let reconnectAttempts = 0;
+const maxReconnectAttempts = 5;
+const reconnectDelay = 1000;
+
+// Initialize WebSocket connection
+function connectWebSocket() {
+    ws = new WebSocket(`ws://${window.location.host}/ws`);
+    
+    ws.onopen = () => {
+        console.log('WebSocket connected');
+        reconnectAttempts = 0;
+    };
+    
+    ws.onclose = (e) => {
+        console.log('WebSocket closed:', e.code, e.reason);
+        if (reconnectAttempts < maxReconnectAttempts) {
+            setTimeout(() => {
+                reconnectAttempts++;
+                connectWebSocket();
+            }, reconnectDelay * Math.pow(2, reconnectAttempts)); // Exponential backoff
+        }
+    };
+    
+    ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+    };
+    
+    ws.onmessage = async function(event) {
+        try {
+            const state = JSON.parse(event.data);
+            console.log('Received state:', {
+                fishCount: state.fish.length,
+                foodCount: state.food.length,
+                blobFish: !!state.blob_fish
+            });
+            
+            // Track fish spawns and deaths
+            const currentFishIds = new Set(state.fish.map(f => f.id));
+            
+            // Check for new fish (spawns)
+            for (const fish of state.fish) {
+                if (!previousFishIds.has(fish.id)) {
+                    SPAWN_EFFECTS.set(fish.id, {
+                        x: fish.x,
+                        y: fish.y,
+                        startTime: Date.now()
+                    });
+                }
+            }
+            
+            // Check for removed fish (deaths)
+            for (const oldId of previousFishIds) {
+                if (!currentFishIds.has(oldId)) {
+                    // Find the last known position of the fish
+                    const deadFish = state.fish.find(f => f.id === oldId) || 
+                                   Array.from(previousFishIds).find(f => f.id === oldId);
+                    if (deadFish) {
+                        DEATH_EFFECTS.set(oldId, {
+                            x: deadFish.x,
+                            y: deadFish.y,
+                            startTime: Date.now()
+                        });
+                    }
+                }
+            }
+            
+            previousFishIds = currentFishIds;
+            
+            // Clear canvas and draw everything
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw ambient particles
+            for(let i = 0; i < 50; i++) {
+                ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                ctx.beginPath();
+                ctx.arc(
+                    (Date.now()/20 + i * 100) % canvas.width,
+                    (Math.sin((Date.now() + i * 1000)/1000) * 50) + i * 16,
+                    1,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fill();
+            }
+            
+            // Draw food
+            state.food.forEach(food => {
+                ctx.save();
+                ctx.shadowColor = '#4ADE80';
+                ctx.shadowBlur = 10;
+                ctx.fillStyle = '#4ADE80';
+                ctx.beginPath();
+                ctx.arc(food.x, food.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+            
+            // Draw fish
+            state.fish.forEach(fish => {
+                drawFish(fish);
+                drawFishThought(ctx, fish);
+                if (fish.thought) {
+                    addThought(fish);
+                }
+            });
+            
+            // Draw effects
+            drawEffects(ctx);
+            
+            // Update data panel
+            updateDataPanel(state.fish, state.food.length);
+            
+            // Draw blob fish
+            if (state.blob_fish) {
+                drawBlobFish(state.blob_fish);
+                drawDevThought(ctx, state.blob_fish);
+                updateDevPanel(state.blob_fish.thought);
+            }
+            
+        } catch (error) {
+            console.error('Error handling message:', error);
+        }
+    };
+}
+
+// Start the connection when the page loads
+connectWebSocket();
 
 function drawFish(fish) {
     ctx.save();
@@ -273,104 +407,16 @@ function drawEffects(ctx) {
     }
 }
 
-// Update the WebSocket message handler
-let previousFishIds = new Set();
-
-ws.onmessage = async function(event) {
-    const state = JSON.parse(event.data);
-    
-    // Track fish spawns and deaths
-    const currentFishIds = new Set(state.fish.map(f => f.id));
-    
-    // Check for new fish (spawns)
-    for (const fish of state.fish) {
-        if (!previousFishIds.has(fish.id)) {
-            SPAWN_EFFECTS.set(fish.id, {
-                x: fish.x,
-                y: fish.y,
-                startTime: Date.now()
-            });
-        }
-    }
-    
-    // Check for removed fish (deaths)
-    for (const oldId of previousFishIds) {
-        if (!currentFishIds.has(oldId)) {
-            // Find the last known position of the fish
-            const deadFish = state.fish.find(f => f.id === oldId) || 
-                           Array.from(previousFishIds).find(f => f.id === oldId);
-            if (deadFish) {
-                DEATH_EFFECTS.set(oldId, {
-                    x: deadFish.x,
-                    y: deadFish.y,
-                    startTime: Date.now()
-                });
-            }
-        }
-    }
-    
-    previousFishIds = currentFishIds;
-    
-    // Clear canvas and draw everything
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw ambient particles
-    for(let i = 0; i < 50; i++) {
-        ctx.fillStyle = 'rgba(255,255,255,0.1)';
-        ctx.beginPath();
-        ctx.arc(
-            (Date.now()/20 + i * 100) % canvas.width,
-            (Math.sin((Date.now() + i * 1000)/1000) * 50) + i * 16,
-            1,
-            0,
-            Math.PI * 2
-        );
-        ctx.fill();
-    }
-    
-    // Draw food
-    state.food.forEach(food => {
-        ctx.save();
-        ctx.shadowColor = '#4ADE80';
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = '#4ADE80';
-        ctx.beginPath();
-        ctx.arc(food.x, food.y, 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    });
-    
-    // Draw fish
-    state.fish.forEach(fish => {
-        drawFish(fish);
-        drawFishThought(ctx, fish);
-        if (fish.thought) {
-            addThought(fish);
-        }
-    });
-    
-    // Draw effects
-    drawEffects(ctx);
-    
-    // Update data panel
-    updateDataPanel(state.fish, state.food.length);
-    
-    // Draw blob fish
-    if (state.blob_fish) {
-        drawBlobFish(state.blob_fish);
-        drawDevThought(ctx, state.blob_fish);
-        updateDevPanel(state.blob_fish.thought);
-    }
-};
-
-// Add click handler for food
+// Update the click handler to use current ws instance
 canvas.onclick = (e) => {
-    const rect = canvas.getBoundingClientRect();
-    ws.send(JSON.stringify({
-        type: 'add_food',
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top
-    }));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        const rect = canvas.getBoundingClientRect();
+        ws.send(JSON.stringify({
+            type: 'add_food',
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+        }));
+    }
 };
 
 function drawBlobFish(blob) {
