@@ -709,7 +709,12 @@ function drawDevThought(ctx, blob) {
 // Add viewer count display
 function updateViewerCount(count) {
     const viewerDisplay = document.getElementById('viewerCount') || createViewerDisplay();
-    viewerDisplay.textContent = `👥 ${count} watching`;
+    if (count >= 5) {
+        viewerDisplay.textContent = `👥 ${count} watching`;
+        viewerDisplay.style.display = 'block';
+    } else {
+        viewerDisplay.style.display = 'none';
+    }
 }
 
 function createViewerDisplay() {
