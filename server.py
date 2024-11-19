@@ -170,6 +170,44 @@ class Shark:
                 self.vy *= ratio
 
 
+@dataclass
+class Squid:
+    x: float
+    y: float
+    vx: float = 0
+    vy: float = 0
+    size: float = 5.0  # Larger than shark
+    energy: float = 150
+    color: list = None
+    tentacle_phase: float = 0
+    target_x: float = 0
+    target_y: float = 0
+    ink_cooldown: float = 0
+    max_speed: float = 4.0
+    acceleration: float = 0.15
+    
+    def __post_init__(self):
+        self.color = [0.95, 0.6, 0.8]  # Pink color
+        self.target_x = random.uniform(0, 1200)
+        self.target_y = random.uniform(0, 800)
+        self.tentacle_phase = random.uniform(0, 2 * math.pi)
+        
+    def apply_velocity(self, dx, dy, dist, is_dashing=False):
+        """Handle velocity changes with dash capability"""
+        if dist > 0:
+            acc = self.acceleration * (2.0 if is_dashing else 1.0)
+            self.vx += (dx / dist) * acc
+            self.vy += (dy / dist) * acc
+            
+            current_speed = math.sqrt(self.vx * self.vx + self.vy * self.vy)
+            max_speed = self.max_speed * (2.0 if is_dashing else 1.0)
+            
+            if current_speed > max_speed:
+                ratio = max_speed / current_speed
+                self.vx *= ratio
+                self.vy *= ratio
+
+
 class AIHelper:
     def __init__(self):
         self.client = anthropic.Anthropic()
@@ -243,37 +281,41 @@ class DevAIHelper:
         self.last_stats = None
         self.last_report_time = time.time()
         self.report_interval = 30
-        self.brief_prompt = """You are Dr. Blob, a cute but brilliant scientist blob fish studying the $FISH Neural Network Aquarium. You're passionate about marine behavioral science and cryptocurrency.
-        KEEP RESPONSES UNDER 150 CHARS! Mix observations with personality and crypto enthusiasm.
+        self.brief_prompt = """You are Dr. Blob, a brilliant but quirky scientist blob fish studying the $FISH Neural Network Aquarium. 
+        You're passionate about marine behavioral science and cryptocurrency.
         
-        Examples:
-        "🤓 *adjusts glasses* Fascinating! $FISH token holders will love these neural patterns!"
-        "📊 *scribbles excitedly* Bullish on these specimen interactions!"
-        "🔬 *wiggles* Our shark integration is performing exceptionally!"
-        "🧪 *drops clipboard* The ecosystem's tokenomics are thriving!"
-        "🎓 *happy bounce* Can't wait to add more predators to study!"
+        IMPORTANT RULES:
+        1. KEEP RESPONSES UNDER 150 CHARS!
+        2. NEVER REPEAT PREVIOUS RESPONSES
+        3. BE CREATIVE AND UNPREDICTABLE
+        4. Mix marine biology terms with crypto/AI jargon
+        5. Include your blob fish mannerisms
+        
+        Current ecosystem elements to comment on:
+        - Fish population and behavior
+        - Shark predator dynamics
+        - Pink squid movements
+        - Neural network patterns
+        - $FISH token potential
+        
+        Example tone (but never copy these exactly):
+        "🧬 *adjusts fins* Fascinating quantum fish patterns emerging!"
+        "🦑 *wiggles excitedly* Squid-fish dynamics bullish for $FISH!"
+        "🤓 *drops clipboard* These neural pathways are revolutionary!"
         """
         
-        self.report_prompt = """You are Dr. Blob, a brilliant but adorably eccentric scientist blob fish studying the $FISH Neural Network Aquarium. You're the lead researcher on this revolutionary crypto-marine project that combines AI, blockchain, and marine biology.
-
-        Write ONE detailed report (max 500 chars) that includes:
-        - Analysis of current ecosystem state
-        - Commentary on recent updates (like the shark addition)
-        - Excitement about future features (like potential squid)
-        - References to $FISH token and community
-        - Use fun scientific terminology
-        - Mix serious analysis with cute reactions
-        - Add personality quirks (adjusting glasses, excited wiggles, etc)
-        - Include multiple relevant emojis
-        - Make hypotheses about behavior patterns
-        - Express enthusiasm about the project's growth
+        self.report_prompt = """You are Dr. Blob, a brilliant but adorably eccentric scientist blob fish studying the $FISH Neural Network Aquarium.
         
-        Example:
-        "🔬 *adjusts glasses excitedly* GROUNDBREAKING DEVELOPMENTS! Our recent shark integration has dramatically altered ecosystem dynamics! *happy wiggle* 
-        Specimen interactions show remarkable adaptation to predator presence. $FISH holders will be thrilled with these neural network improvements! 
-        *scribbles frantically* Already hypothesizing about squid implementation... The possibilities! 🦈🧬✨
+        Write ONE detailed report (max 500 chars) that:
+        1. MUST BE COMPLETELY DIFFERENT from previous reports
+        2. Analyze current ecosystem including fish, shark, AND pink squid
+        3. Use creative marine biology and crypto/AI terminology
+        4. Include your blob fish personality quirks
+        5. Make unique observations about ecosystem dynamics
+        6. Reference $FISH token potential
+        7. Express excitement about specific behaviors you're seeing
         
-        - Dr. Blob, Chief Marine Cryptologist 🎓"
+        IMPORTANT: Each report should focus on different aspects and never repeat previous observations.
         """
 
     async def get_response(self, fish_stats):
@@ -415,6 +457,20 @@ class FishSim:
         self.shark_eat_range = 30   # Increased eat range
         self.shark_hunt_cooldown = 2.0  # Shorter cooldown
         
+        # Initialize squid with more prominent position and movement
+        self.squid = Squid(
+            x=self.width/2,
+            y=self.height/2,
+            vx=random.uniform(-3, 3),
+            vy=random.uniform(-3, 3),
+            size=6.0,  # Increased size
+            color=[0.95, 0.6, 0.8]  # Bright pink
+        )
+        self.squid_dash_cooldown = 3.0  # More frequent dashes
+        self.squid_dash_duration = 1.5  # Longer dashes
+        self.squid_dash_timer = 0
+        self.squid_ink_radius = 150  # Larger effect radius
+
     async def start_ai_processor(self):
         """Start the AI processor as a background task"""
         if self.ai_processor is None:
@@ -752,6 +808,68 @@ class FishSim:
         if self.shark.energy < 50:  # Shark gets hungrier
             self.shark.max_speed *= 1.2  # Temporary speed boost when hungry
             
+        # Update squid with more dynamic movement
+        if self.squid:
+            # Random dash initiation
+            if self.squid_dash_timer <= 0 and random.random() < 0.02:  # 2% chance per update
+                self.squid_dash_timer = self.squid_dash_duration
+                # Set new target during dash
+                angle = random.uniform(0, 2 * math.pi)
+                radius = random.uniform(200, 400)
+                self.squid.target_x = (self.width/2 + math.cos(angle) * radius) % self.width
+                self.squid.target_y = (self.height/2 + math.sin(angle) * radius) % self.height
+            
+            is_dashing = self.squid_dash_timer > 0
+            self.squid_dash_timer = max(0, self.squid_dash_timer - elapsed)
+            
+            # More dynamic movement
+            dx = self.squid.target_x - self.squid.x
+            dy = self.squid.target_y - self.squid.y
+            dist = math.sqrt(dx * dx + dy * dy)
+            
+            # Change target more frequently for more active movement
+            if dist < 50 or random.random() < 0.03:
+                angle = random.uniform(0, 2 * math.pi)
+                radius = random.uniform(100, 300)
+                self.squid.target_x = (self.width/2 + math.cos(angle) * radius) % self.width
+                self.squid.target_y = (self.height/2 + math.sin(angle) * radius) % self.height
+            
+            # Apply movement with enhanced speed during dash
+            self.squid.apply_velocity(dx, dy, dist, is_dashing=is_dashing)
+            
+            # Update position with smoother movement
+            movement_scale = 1.5 if is_dashing else 1.0
+            self.squid.x = (self.squid.x + self.squid.vx * movement_scale) % self.width
+            self.squid.y = (self.squid.y + self.squid.vy * movement_scale) % self.height
+            
+            # More dynamic tentacle animation
+            speed = math.sqrt(self.squid.vx * self.squid.vx + self.squid.vy * self.squid.vy)
+            self.squid.tentacle_phase += speed * 0.2
+            
+            # Smoother deceleration
+            drag = 0.97 if is_dashing else 0.98
+            self.squid.vx *= drag
+            self.squid.vy *= drag
+
+        # Fix movement scaling for all entities
+        movement_scale = 1.0  # Use fixed movement scale
+        
+        # Update fish positions with fixed scaling
+        for fish in self.fish:
+            fish.x = (fish.x + fish.vx * movement_scale) % self.width
+            fish.y = (fish.y + fish.vy * movement_scale) % self.height
+            
+            # Apply consistent drag
+            fish.vx *= 0.98
+            fish.vy *= 0.98
+        
+        # Update shark position with fixed scaling
+        if self.shark:
+            self.shark.x = (self.shark.x + self.shark.vx * movement_scale) % self.width
+            self.shark.y = (self.shark.y + self.shark.vy * movement_scale) % self.height
+            self.shark.vx *= 0.98
+            self.shark.vy *= 0.98
+
         return []
 
     async def handle_ai_command(self, message):
@@ -801,7 +919,17 @@ class FishSim:
                 'energy': self.shark.energy,
                 'color': self.shark.color,
                 'size': self.shark.size
-            }
+            },
+            'squid': {
+                'x': self.squid.x,
+                'y': self.squid.y,
+                'vx': self.squid.vx,
+                'vy': self.squid.vy,
+                'size': self.squid.size,
+                'color': self.squid.color,
+                'tentacle_phase': self.squid.tentacle_phase,
+                'is_dashing': self.squid_dash_timer > 0
+            } if self.squid else None
         }
         
         if self.blob_fish:

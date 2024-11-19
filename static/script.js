@@ -157,6 +157,11 @@ function connectWebSocket() {
                 updateDevPanel(state.blob_fish.thought);
             }
             
+            // Draw squid
+            if (state.squid) {
+                drawSquid(ctx, state.squid);
+            }
+            
             // Draw effects
             drawEffects(ctx);
             
@@ -793,5 +798,64 @@ function drawShark(shark) {
         ctx.stroke();
     }
 
+    ctx.restore();
+}
+
+function drawSquid(ctx, squid) {
+    ctx.save();
+    
+    // Move to squid position
+    ctx.translate(squid.x, squid.y);
+    
+    // Rotate based on movement direction
+    let angle = Math.atan2(squid.vy, squid.vx);
+    ctx.rotate(angle);
+    
+    // Draw body
+    ctx.fillStyle = `rgb(${squid.color[0] * 255}, ${squid.color[1] * 255}, ${squid.color[2] * 255})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, squid.size * 15, squid.size * 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Draw tentacles
+    const tentacleCount = 8;
+    const tentacleLength = squid.size * 20;
+    
+    for (let i = 0; i < tentacleCount; i++) {
+        const baseAngle = (i / tentacleCount) * Math.PI - Math.PI/2;
+        const waveOffset = Math.sin(squid.tentacle_phase + i) * 0.3;
+        
+        ctx.beginPath();
+        ctx.moveTo(0, squid.size * 8);
+        
+        // Create curved tentacle
+        ctx.bezierCurveTo(
+            Math.cos(baseAngle + waveOffset) * tentacleLength * 0.5,
+            squid.size * 8 + tentacleLength * 0.3,
+            Math.cos(baseAngle + waveOffset) * tentacleLength * 0.7,
+            squid.size * 8 + tentacleLength * 0.6,
+            Math.cos(baseAngle + waveOffset) * tentacleLength,
+            squid.size * 8 + tentacleLength
+        );
+        
+        ctx.lineWidth = squid.size * 2;
+        ctx.strokeStyle = `rgb(${squid.color[0] * 255}, ${squid.color[1] * 255}, ${squid.color[2] * 255})`;
+        ctx.stroke();
+    }
+    
+    // Draw eyes
+    const eyeSize = squid.size * 3;
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.ellipse(-squid.size * 5, -squid.size * 2, eyeSize, eyeSize, 0, 0, Math.PI * 2);
+    ctx.ellipse(squid.size * 5, -squid.size * 2, eyeSize, eyeSize, 0, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.fillStyle = 'black';
+    ctx.beginPath();
+    ctx.ellipse(-squid.size * 5, -squid.size * 2, eyeSize * 0.5, eyeSize * 0.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(squid.size * 5, -squid.size * 2, eyeSize * 0.5, eyeSize * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    
     ctx.restore();
 }
