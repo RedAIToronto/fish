@@ -292,7 +292,12 @@ class FishSim:
         self.load_state()  # Load saved state on startup
         self.last_save_time = time.time()
         self.save_interval = 30  # Save every 30 seconds
-
+        self.food_limit = 50  # Maximum food items allowed
+        self.food_cooldown = {}  # Track food spawn cooldown per client
+        self.food_rate_limit = 1.0  # Seconds between food spawns per client
+        self.max_fish = 50  # Maximum fish allowed
+        self.min_fish = 10  # Minimum fish to maintain
+        
     async def start_ai_processor(self):
         """Start the AI processor as a background task"""
         if self.ai_processor is None:
@@ -490,6 +495,30 @@ class FishSim:
         self.blob_fish.y += math.cos(time.time() * 0.3) * 0.2
         self.blob_fish.tail_angle = math.sin(time.time()) * 0.1
 
+        # Population control
+        if len(self.fish) > self.max_fish:
+            # Remove excess fish, keeping the healthiest ones
+            self.fish.sort(key=lambda f: f.energy, reverse=True)
+            self.fish = self.fish[:self.max_fish]
+        elif len(self.fish) < self.min_fish:
+            # Spawn new fish up to minimum
+            for _ in range(self.min_fish - len(self.fish)):
+                self.fish.append(Fish(
+                    random.uniform(0, self.width),
+                    random.uniform(0, self.height)
+                ))
+
+        # Cleanup old food
+        if len(self.food) > self.food_limit:
+            self.food = self.food[-self.food_limit:]
+
+        # Clean up old cooldowns
+        self.food_cooldown = {
+            client: time 
+            for client, time in self.food_cooldown.items() 
+            if current_time - time < 60  # Remove cooldowns older than 1 minute
+        }
+
         return code_updates
 
     async def handle_ai_command(self, message):
@@ -530,6 +559,28 @@ class FishSim:
         }
         return state
 
+    async def add_food(self, x, y, client_id):
+        """Rate-limited food addition"""
+        current_time = time.time()
+        
+        # Check cooldown
+        if client_id in self.food_cooldown:
+            if current_time - self.food_cooldown[client_id] < self.food_rate_limit:
+                return False
+            
+        # Check food limit
+        if len(self.food) >= self.food_limit:
+            return False
+            
+        # Add food and update cooldown
+        self.food.append({
+            'x': x,
+            'y': y,
+            'energy': 30
+        })
+        self.food_cooldown[client_id] = current_time
+        return True
+
 
 app = FastAPI()
 
@@ -557,32 +608,27 @@ async def shutdown_event():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    client_id = str(id(websocket))  # Unique ID for rate limiting
     await websocket.accept()
-    logger.info("New WebSocket connection accepted")
+    logger.info(f"New WebSocket connection accepted: {client_id}")
     
     try:
-        async def simulation_loop():
-            while True:
-                try:
-                    code_updates = await sim.update()
-                    state = await sim.get_state()
-                    logger.debug(f"Sending state with {len(state['fish'])} fish")
-                    await websocket.send_json(state)
-                    await asyncio.sleep(0.05)
-                except Exception as e:
-                    logger.error(f"Simulation loop error: {e}")
-                    break
-
         async def receive_loop():
             while True:
                 try:
                     data = await websocket.receive_json()
                     if data['type'] == 'add_food':
-                        sim.food.append({
-                            'x': data['x'],
-                            'y': data['y'],
-                            'energy': 30
-                        })
+                        success = await sim.add_food(
+                            data['x'],
+                            data['y'],
+                            client_id
+                        )
+                        if not success:
+                            # Optional: Inform client of rate limit
+                            await websocket.send_json({
+                                'type': 'error',
+                                'message': 'Rate limit exceeded'
+                            })
                     elif data['type'] == 'ai_query':
                         response = await sim.handle_ai_command(data['message'])
                         await websocket.send_json({
@@ -590,19 +636,29 @@ async def websocket_endpoint(websocket: WebSocket):
                             'message': response
                         })
                 except WebSocketDisconnect:
-                    logger.info("Client disconnected normally")
+                    logger.info(f"Client disconnected: {client_id}")
                     break
                 except Exception as e:
                     logger.error(f"Receive loop error: {e}")
                     break
 
+        # Reduce update frequency for high load
+        async def simulation_loop():
+            while True:
+                try:
+                    code_updates = await sim.update()
+                    state = await sim.get_state()
+                    await websocket.send_json(state)
+                    await asyncio.sleep(0.1)  # Reduced update rate
+                except Exception as e:
+                    logger.error(f"Simulation loop error: {e}")
+                    break
+
         await asyncio.gather(simulation_loop(), receive_loop())
-    except WebSocketDisconnect:
-        logger.info("WebSocket disconnected")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
     finally:
-        logger.info("Cleaning up WebSocket connection")
+        # Cleanup when client disconnects
+        if client_id in sim.food_cooldown:
+            del sim.food_cooldown[client_id]
 
 if __name__ == "__main__":
     import uvicorn
