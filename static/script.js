@@ -17,6 +17,12 @@ let reconnectAttempts = 0;
 const maxReconnectAttempts = 5;
 const reconnectDelay = 1000;
 
+// Add constants at the top
+const FPS = 60;
+const frameDelay = 1000 / FPS;
+let lastFrameTime = 0;
+let viewerCount = 0;
+
 // Initialize WebSocket connection
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -47,6 +53,22 @@ function connectWebSocket() {
     ws.onmessage = async function(event) {
         try {
             const state = JSON.parse(event.data);
+            
+            // Update viewer count if provided
+            if (state.viewer_count !== undefined) {
+                viewerCount = state.viewer_count;
+                updateViewerCount(viewerCount);
+            }
+
+            // Frame rate control
+            const currentTime = Date.now();
+            const elapsed = currentTime - lastFrameTime;
+            
+            if (elapsed < frameDelay) {
+                return; // Skip frame if too soon
+            }
+            lastFrameTime = currentTime;
+
             console.log('Received state:', {
                 fishCount: state.fish.length,
                 foodCount: state.food.length,
@@ -682,4 +704,18 @@ function drawDevThought(ctx, blob) {
     });
     
     ctx.restore();
+}
+
+// Add viewer count display
+function updateViewerCount(count) {
+    const viewerDisplay = document.getElementById('viewerCount') || createViewerDisplay();
+    viewerDisplay.textContent = `👥 ${count} watching`;
+}
+
+function createViewerDisplay() {
+    const display = document.createElement('div');
+    display.id = 'viewerCount';
+    display.className = 'viewer-count';
+    document.querySelector('.container').prepend(display);
+    return display;
 }

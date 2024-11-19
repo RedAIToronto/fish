@@ -297,6 +297,7 @@ class FishSim:
         self.food_rate_limit = 1.0  # Seconds between food spawns per client
         self.max_fish = 50  # Maximum fish allowed
         self.min_fish = 10  # Minimum fish to maintain
+        self.connected_clients = set()  # Add this line
         
     async def start_ai_processor(self):
         """Start the AI processor as a background task"""
@@ -549,7 +550,8 @@ class FishSim:
             'dimensions': {
                 'width': self.width,
                 'height': self.height
-            }
+            },
+            'viewer_count': len(self.connected_clients)  # Add viewer count to state
         }
         state['blob_fish'] = {
             'x': self.blob_fish.x,
@@ -580,6 +582,12 @@ class FishSim:
         })
         self.food_cooldown[client_id] = current_time
         return True
+
+    def add_client(self, client):
+        self.connected_clients.add(client)
+        
+    def remove_client(self, client):
+        self.connected_clients.discard(client)
 
 
 app = FastAPI()
