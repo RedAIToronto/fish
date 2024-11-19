@@ -39,6 +39,9 @@ class Fish:
     last_code: str = ""
     last_thought: str = ""
     think_timer: float = 0
+    max_speed: float = 5.0
+    acceleration: float = 0.2
+    food_acceleration: float = 0.4
 
     def __post_init__(self):
         if self.color is None:
@@ -92,6 +95,22 @@ self.tail_angle = {self.tail_angle:.2f}
 """
         self.last_code = code
         return code
+
+    def apply_velocity(self, dx, dy, dist, is_food=False):
+        """New method to handle velocity changes with speed cap"""
+        if dist > 0:
+            acc = self.food_acceleration if is_food else self.acceleration
+            self.vx += (dx / dist) * acc
+            self.vy += (dy / dist) * acc
+            
+            # Calculate current speed
+            current_speed = math.sqrt(self.vx * self.vx + self.vy * self.vy)
+            
+            # Cap speed if exceeded
+            if current_speed > self.max_speed:
+                ratio = self.max_speed / current_speed
+                self.vx *= ratio
+                self.vy *= ratio
 
 
 @dataclass
@@ -483,17 +502,16 @@ class FishSim:
             self.food = []
 
     async def update(self):
-        """Updated update loop with more frequent state saving"""
+        """Updated update loop with better speed control"""
         current_time = time.time()
-        
+        elapsed = min(current_time - self.last_update, 0.1)  # Cap elapsed time
+        self.last_update = current_time
+
         # Save state more frequently
         if current_time - self.last_save_time >= self.save_interval:
             await self.save_state()
             self.last_save_time = current_time
             
-        elapsed = min(current_time - self.last_update, 0.1)
-        self.last_update = current_time
-
         # Ensure blob fish thoughts are queued
         if (current_time - self.last_blob_thought_time > self.blob_observation_interval and 
             self.ai_queue.qsize() < self.max_queue_size):
@@ -543,27 +561,24 @@ class FishSim:
 
         # Regular fish updates
         for fish in self.fish:
-            fish.think_timer -= elapsed
-            
             # Movement calculations
             dx = fish.target_x - fish.x
             dy = fish.target_y - fish.y
             dist = math.sqrt(dx * dx + dy * dy)
 
-            # More frequent target changes for liveliness
-            if dist < 20 or random.random() < 0.02:  # Increased random retargeting
+            # Target changes
+            if dist < 20 or random.random() < 0.02:
                 fish.target_x = random.uniform(0, self.width)
                 fish.target_y = random.uniform(0, self.height)
 
-            if dist > 0:
-                fish.vx += (dx / dist) * 0.3  # Increased movement speed
-                fish.vy += (dy / dist) * 0.3
+            # Apply normal movement
+            fish.apply_velocity(dx, dy, dist)
 
-            # Optimized food seeking
+            # Food seeking with separate handling
             if self.food:
                 nearest_dist = float('inf')
                 nearest_food = None
-                for food in self.food[:10]:  # Only check nearest 10 food items
+                for food in self.food[:10]:
                     food_dx = food['x'] - fish.x
                     food_dy = food['y'] - fish.y
                     food_dist = food_dx * food_dx + food_dy * food_dy
@@ -576,26 +591,26 @@ class FishSim:
                     food_dy = nearest_food['y'] - fish.y
                     dist = math.sqrt(nearest_dist)
                     if dist > 0:
-                        fish.vx += (food_dx / dist) * 0.8
-                        fish.vy += (food_dy / dist) * 0.8
+                        fish.apply_velocity(food_dx, food_dy, dist, is_food=True)
                     if dist < 10:
                         fish.energy += 30
                         self.food.remove(nearest_food)
 
-            # Smooth position updates
-            fish.x = (fish.x + fish.vx * elapsed * 60) % self.width  # Scale movement with time
-            fish.y = (fish.y + fish.vy * elapsed * 60) % self.height
+            # Smooth position updates with speed cap
+            movement_scale = min(elapsed * 60, 2.0)  # Cap movement scale
+            fish.x = (fish.x + fish.vx * movement_scale) % self.width
+            fish.y = (fish.y + fish.vy * movement_scale) % self.height
 
-            # Smoother drag
-            drag = pow(0.98, elapsed * 60)
+            # Smoother drag with better control
+            drag = pow(0.95, elapsed * 60)  # Increased drag
             fish.vx *= drag
             fish.vy *= drag
 
-            # Smoother energy and animation updates
+            # Energy and animation updates
             fish.energy -= 0.1 * elapsed
             speed = math.sqrt(fish.vx * fish.vx + fish.vy * fish.vy)
-            fish.phase += speed * 0.1 * elapsed * 60
-            fish.tail_angle = math.sin(fish.phase) * (0.2 + min(speed / 5, 1) * 0.3)
+            fish.phase += speed * 0.1 * min(elapsed * 60, 2.0)  # Cap animation speed
+            fish.tail_angle = math.sin(fish.phase) * (0.2 + min(speed / fish.max_speed, 1) * 0.3)
 
         # Population control with smoother transitions
         self.fish = [f for f in self.fish if f.energy > 0]
