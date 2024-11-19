@@ -286,7 +286,7 @@ class FishSim:
         self.ai_queue = asyncio.Queue()
         self.max_queue_size = 2
         self.last_ai_call = 0
-        self.min_ai_interval = 3.0
+        self.min_ai_interval = 5.0
         self.ai_processor = None  # Will be initialized later
         self.state_file = "fish_state.json"
         self.load_state()  # Load saved state on startup
@@ -296,15 +296,15 @@ class FishSim:
         self.food_rate_limit = 2.0  # Increase cooldown between food spawns
         self.food_batch_queue = []  # New: Queue for batching food additions
         self.last_food_process = time.time()
-        self.food_process_interval = 0.1  # Process food every 100ms
+        self.food_process_interval = 0.05  # Process food every 100ms
         self.food_cooldown = {}  # Track food spawn cooldown per client
         self.max_fish = 50  # Maximum fish allowed
         self.min_fish = 10  # Minimum fish to maintain
         self.connected_clients = set()  # Change to store client IDs instead of WebSocket objects
         self.unique_ips = set()  # New: Track unique IPs
         self.think_batch_size = 3  # New: Process thoughts in batches
-        self.update_interval = 0.1  # Reduce update frequency
-        self.broadcast_throttle = 0.1  # Throttle broadcasts
+        self.update_interval = 0.05  # Faster base update rate (20fps)
+        self.broadcast_throttle = 0.05  # Faster broadcast rate
         self.last_broadcast = time.time()
         self.max_clients_per_ip = 3  # Limit connections per IP
         self.ip_connections = {}  # Track connections per IP
@@ -316,7 +316,8 @@ class FishSim:
         self.high_load_mode = False
         self.load_check_interval = 5.0  # Check load every 5 seconds
         self.last_load_check = time.time()
-        
+        self.high_load_threshold = 50  # Number of clients that triggers high load mode
+
     async def start_ai_processor(self):
         """Start the AI processor as a background task"""
         if self.ai_processor is None:
@@ -432,56 +433,20 @@ class FishSim:
     async def update(self):
         """Optimized update loop"""
         current_time = time.time()
+        elapsed = current_time - self.last_update
+        self.last_update = current_time
         
         # Check system load
         if current_time - self.last_load_check > self.load_check_interval:
-            self.high_load_mode = len(self.connected_clients) > 50
+            self.high_load_mode = len(self.connected_clients) > self.high_load_threshold
             self.last_load_check = current_time
         
         # Process food queue
         await self.process_food_queue()
         
-        # Adjust simulation based on load
-        if self.high_load_mode:
-            self.update_interval = 0.2  # Reduce update frequency under high load
-            self.food_limit = 20  # Reduce food limit
-            self.think_batch_size = 2  # Reduce AI processing
-        else:
-            self.update_interval = 0.1
-            self.food_limit = 30
-            self.think_batch_size = 3
-        
-        # Save state periodically
-        if current_time - self.last_save_time > self.save_interval:
-            await self.save_state()
-            self.last_save_time = current_time
-        
-        # Queue blob fish thoughts less frequently
-        if (current_time - self.last_blob_thought_time > 8 and 
-            self.ai_queue.qsize() < self.max_queue_size):
-            
-            fish_stats = [{
-                'id': str(id(f)),
-                'energy': f.energy,
-                'speed': (f.vx**2 + f.vy**2)**0.5,
-                'is_dying': f.energy < 30
-            } for f in self.fish]
-            
-            await self.ai_queue.put(('blob', self.blob_fish, fish_stats))
-            self.last_blob_thought_time = current_time
-
-        # Queue regular fish thoughts
-        thinking_candidates = [f for f in self.fish if f.think_timer <= 0]
-        if thinking_candidates and self.ai_queue.qsize() < self.max_queue_size:
-            fish = random.choice(thinking_candidates)
-            await self.ai_queue.put(('fish', fish, None))
-            fish.think_timer = 5  # Short timer in case AI fails
-
         # Regular simulation updates
-        code_updates = []
-        
         for fish in self.fish:
-            fish.think_timer -= 0.05
+            fish.think_timer -= elapsed  # Use actual elapsed time
             
             # Natural swimming behavior
             dx = fish.target_x - fish.x
@@ -496,6 +461,7 @@ class FishSim:
                 fish.vx += (dx / dist) * 0.2
                 fish.vy += (dy / dist) * 0.2
 
+            # Food seeking behavior
             if self.food:
                 food_dist = [(f, np.hypot(f['x'] - fish.x, f['y'] - fish.y))
                              for f in self.food]
@@ -503,7 +469,7 @@ class FishSim:
                 if nearest[1] < 150:
                     dx = nearest[0]['x'] - fish.x
                     dy = nearest[0]['y'] - fish.y
-                    dist = np.hypot(dx, dy)
+                    dist = nearest[1]
                     if dist > 0:
                         fish.vx += (dx / dist) * 0.8
                         fish.vy += (dy / dist) * 0.8
@@ -511,60 +477,41 @@ class FishSim:
                         fish.energy += 30
                         self.food.remove(nearest[0])
 
-            speed = np.hypot(fish.vx, fish.vy)
-            max_speed = 5
-            if speed > max_speed:
-                fish.vx = (fish.vx / speed) * max_speed
-                fish.vy = (fish.vy / speed) * max_speed
-
-            fish.phase += speed * 0.1
-            fish.tail_angle = math.sin(fish.phase) * (0.2 + min(speed / max_speed, 1) * 0.3)
-
-            code_updates.append(fish.update_behavior(dx, dy, dist, speed))
-
+            # Update position
             fish.x = (fish.x + fish.vx) % self.width
             fish.y = (fish.y + fish.vy) % self.height
 
+            # Apply drag
             fish.vx *= 0.98
             fish.vy *= 0.98
 
-            fish.energy -= 0.1
+            # Update energy
+            fish.energy -= 0.1 * elapsed  # Scale energy loss with time
 
-        self.fish = [f for f in self.fish if f.energy > 0]
-        if random.random() < 0.02:
-            self.fish.append(Fish(random.uniform(0, self.width),
-                                  random.uniform(0, self.height)))
-
-        # Gentle floating movement for blob fish
-        self.blob_fish.x += math.sin(time.time() * 0.5) * 0.3
-        self.blob_fish.y += math.cos(time.time() * 0.3) * 0.2
-        self.blob_fish.tail_angle = math.sin(time.time()) * 0.1
+            # Update animation
+            speed = np.hypot(fish.vx, fish.vy)
+            fish.phase += speed * 0.1
+            fish.tail_angle = math.sin(fish.phase) * (0.2 + min(speed / 5, 1) * 0.3)
 
         # Population control
+        self.fish = [f for f in self.fish if f.energy > 0]
+        
         if len(self.fish) > self.max_fish:
-            # Remove excess fish, keeping the healthiest ones
             self.fish.sort(key=lambda f: f.energy, reverse=True)
             self.fish = self.fish[:self.max_fish]
         elif len(self.fish) < self.min_fish:
-            # Spawn new fish up to minimum
             for _ in range(self.min_fish - len(self.fish)):
                 self.fish.append(Fish(
                     random.uniform(0, self.width),
                     random.uniform(0, self.height)
                 ))
 
-        # Cleanup old food
-        if len(self.food) > self.food_limit:
-            self.food = self.food[-self.food_limit:]
+        # Blob fish movement
+        self.blob_fish.x += math.sin(time.time() * 0.5) * 0.3
+        self.blob_fish.y += math.cos(time.time() * 0.3) * 0.2
+        self.blob_fish.tail_angle = math.sin(time.time()) * 0.1
 
-        # Clean up old cooldowns
-        self.food_cooldown = {
-            client: time 
-            for client, time in self.food_cooldown.items() 
-            if current_time - time < 60  # Remove cooldowns older than 1 minute
-        }
-
-        return code_updates
+        return []  # Return empty code updates as they're not used
 
     async def handle_ai_command(self, message):
         state = {
@@ -728,15 +675,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     current_time = time.time()
                     if current_time - last_broadcast >= sim.broadcast_throttle:
+                        await sim.update()  # Run simulation update
                         state = await sim.get_state()
                         await websocket.send_json(state)
                         last_broadcast = current_time
-                        
-                        # Adaptive sleep based on load
-                        sleep_time = 0.1 if sim.high_load_mode else 0.05
-                        await asyncio.sleep(sleep_time)
-                    else:
-                        await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.01)  # Small sleep to prevent CPU hogging
                 except Exception as e:
                     logger.error(f"Broadcast error: {e}")
                     break
@@ -752,7 +695,6 @@ async def websocket_endpoint(websocket: WebSocket):
                             client_id,
                             client_ip
                         )
-                    await asyncio.sleep(0.05)  # Add small delay between messages
                 except Exception as e:
                     logger.error(f"Receive error: {e}")
                     break
