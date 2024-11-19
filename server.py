@@ -470,6 +470,23 @@ class FishSim:
         self.squid_dash_duration = 1.5  # Longer dashes
         self.squid_dash_timer = 0
         self.squid_ink_radius = 150  # Larger effect radius
+        
+        # Add fixed time step for movement
+        self.fixed_time_step = 1/60  # 60 FPS target
+        self.max_movement_scale = 1.0  # Cap movement scaling
+        self.movement_speed_factor = 0.3  # Further reduce overall speed
+        
+        # Adjust entity speeds and behaviors
+        self.fish_base_speed = 1.5  # Slower base speed
+        self.shark_base_speed = 2.0  # Moderate shark speed
+        self.squid_base_speed = 1.8  # Moderate squid speed
+        self.food_detection_range = 150  # Range to detect food
+        self.movement_speed_factor = 0.3  # Further reduce overall speed
+        
+        # Food-seeking parameters
+        self.food_attraction_strength = 0.8
+        self.food_energy_value = 30
+        self.food_eat_distance = 15
 
     async def start_ai_processor(self):
         """Start the AI processor as a background task"""
@@ -618,202 +635,133 @@ class FishSim:
             self.food = []
 
     async def update(self):
-        """Updated update loop with better speed control"""
+        """Update with improved movement and food seeking"""
         current_time = time.time()
-        elapsed = min(current_time - self.last_update, 0.1)  # Cap elapsed time
+        elapsed = min(current_time - self.last_update, 0.1)
         self.last_update = current_time
 
-        # Save state more frequently
-        if current_time - self.last_save_time >= self.save_interval:
-            await self.save_state()
-            self.last_save_time = current_time
-            
-        # Ensure blob fish thoughts are queued
-        if (current_time - self.last_blob_thought_time > self.blob_observation_interval and 
-            self.ai_queue.qsize() < self.max_queue_size):
-            await self.ai_queue.put(('blob', self.blob_fish, None))
-            self.last_blob_thought_time = current_time
-
-        # Update fish think timers and queue thoughts
+        # Calculate movement scale
+        movement_scale = min(self.fixed_time_step * 60, self.max_movement_scale) * self.movement_speed_factor
+        
+        # Update fish with food seeking
         for fish in self.fish:
-            fish.think_timer -= elapsed
+            # Find nearest food
+            nearest_food = None
+            nearest_dist = float('inf')
             
-            # Queue thoughts for fish that need to think
-            if (fish.think_timer <= 0 and 
-                self.ai_enabled and 
-                self.ai_queue.qsize() < self.max_queue_size):
-                await self.ai_queue.put(('fish', fish, None))
-                fish.think_timer = 1.0  # Temporary timer until thought processed
-
-        # Process food queue immediately
-        while self.food_batch_queue and len(self.food) < self.food_limit:
-            self.food.append(self.food_batch_queue.pop(0))
-
-        # Spawn logic
-        self.spawn_timer += elapsed
-        if self.spawn_timer >= self.spawn_interval:
-            self.spawn_timer = 0
-            current_fish = len(self.fish)
+            for food in self.food:
+                dx = food['x'] - fish.x
+                dy = food['y'] - fish.y
+                dist = math.sqrt(dx * dx + dy * dy)
+                
+                if dist < nearest_dist and dist < self.food_detection_range:
+                    nearest_dist = dist
+                    nearest_food = food
             
-            # Spawn new fish if below optimal
-            if current_fish < self.optimal_fish:
-                spawn_count = min(3, self.optimal_fish - current_fish)
-                for _ in range(spawn_count):
-                    self.fish.append(Fish(
-                        random.uniform(0, self.width),
-                        random.uniform(0, self.height),
-                        energy=100  # Full energy for new fish
-                    ))
-            
-            # Emergency spawn if below minimum
-            elif current_fish < self.min_fish:
-                spawn_count = self.min_fish - current_fish
-                for _ in range(spawn_count):
-                    self.fish.append(Fish(
-                        random.uniform(0, self.width),
-                        random.uniform(0, self.height),
-                        energy=100
-                    ))
+            # Move towards food if found, otherwise normal movement
+            if nearest_food and fish.energy < 80:  # Only seek food if not full
+                dx = nearest_food['x'] - fish.x
+                dy = nearest_food['y'] - fish.y
+                dist = math.sqrt(dx * dx + dy * dy)
+                
+                # Eat food if close enough
+                if dist < self.food_eat_distance:
+                    fish.energy = min(100, fish.energy + self.food_energy_value)
+                    self.food.remove(nearest_food)
+                else:
+                    # Move towards food with increased attraction
+                    fish.vx += (dx/dist) * self.fish_base_speed * self.food_attraction_strength * movement_scale
+                    fish.vy += (dy/dist) * self.fish_base_speed * self.food_attraction_strength * movement_scale
+            else:
+                # Normal wandering behavior
+                dx = fish.target_x - fish.x
+                dy = fish.target_y - fish.y
+                dist = math.sqrt(dx * dx + dy * dy)
+                
+                if dist < 20 or random.random() < 0.02:
+                    fish.target_x = random.uniform(0, self.width)
+                    fish.target_y = random.uniform(0, self.height)
+                
+                if dist > 0:
+                    fish.vx += (dx/dist) * self.fish_base_speed * movement_scale * 0.5
+                    fish.vy += (dy/dist) * self.fish_base_speed * movement_scale * 0.5
 
-        # Regular fish updates
-        for fish in self.fish:
-            # Movement calculations
-            dx = fish.target_x - fish.x
-            dy = fish.target_y - fish.y
-            dist = math.sqrt(dx * dx + dy * dy)
-
-            # Target changes
-            if dist < 20 or random.random() < 0.02:
-                fish.target_x = random.uniform(0, self.width)
-                fish.target_y = random.uniform(0, self.height)
-
-            # Apply normal movement
-            fish.apply_velocity(dx, dy, dist)
-
-            # Food seeking with separate handling
-            if self.food:
-                nearest_dist = float('inf')
-                nearest_food = None
-                for food in self.food[:10]:
-                    food_dx = food['x'] - fish.x
-                    food_dy = food['y'] - fish.y
-                    food_dist = food_dx * food_dx + food_dy * food_dy
-                    if food_dist < nearest_dist:
-                        nearest_dist = food_dist
-                        nearest_food = food
-
-                if nearest_dist < 22500:  # 150^2
-                    food_dx = nearest_food['x'] - fish.x
-                    food_dy = nearest_food['y'] - fish.y
-                    dist = math.sqrt(nearest_dist)
-                    if dist > 0:
-                        fish.apply_velocity(food_dx, food_dy, dist, is_food=True)
-                    if dist < 10:
-                        fish.energy += 30
-                        self.food.remove(nearest_food)
-
-            # Smooth position updates with speed cap
-            movement_scale = min(elapsed * 60, 2.0)  # Cap movement scale
-            fish.x = (fish.x + fish.vx * movement_scale) % self.width
-            fish.y = (fish.y + fish.vy * movement_scale) % self.height
-
-            # Smoother drag with better control
-            drag = pow(0.95, elapsed * 60)  # Increased drag
-            fish.vx *= drag
-            fish.vy *= drag
-
-            # Energy and animation updates
-            fish.energy -= 0.1 * elapsed
+            # Apply velocity caps and updates
             speed = math.sqrt(fish.vx * fish.vx + fish.vy * fish.vy)
-            fish.phase += speed * 0.1 * min(elapsed * 60, 2.0)  # Cap animation speed
-            fish.tail_angle = math.sin(fish.phase) * (0.2 + min(speed / fish.max_speed, 1) * 0.3)
+            if speed > self.fish_base_speed:
+                fish.vx = (fish.vx/speed) * self.fish_base_speed
+                fish.vy = (fish.vy/speed) * self.fish_base_speed
 
-        # Population control with smoother transitions
-        self.fish = [f for f in self.fish if f.energy > 0]
-        
-        if len(self.fish) > self.max_fish:
-            # Remove excess fish, keeping the healthiest ones
-            self.fish.sort(key=lambda f: f.energy, reverse=True)
-            self.fish = self.fish[:self.max_fish]
-        
-        # Natural spawning (random chance)
-        if random.random() < 0.01 and len(self.fish) < self.max_fish:
-            self.fish.append(Fish(
-                random.uniform(0, self.width),
-                random.uniform(0, self.height),
-                energy=100
-            ))
+            # Update position with wrapping
+            fish.x = (fish.x + fish.vx) % self.width
+            fish.y = (fish.y + fish.vy) % self.height
+            
+            # Apply drag
+            fish.vx *= 0.95
+            fish.vy *= 0.95
+            
+            # Update energy and animation
+            fish.energy = max(0, fish.energy - 0.05 * self.fixed_time_step)
+            fish.phase += speed * 0.1
+            fish.tail_angle = math.sin(fish.phase) * 0.3
 
-        # Simplified blob fish movement
-        t = current_time * 0.5
-        self.blob_fish.x += math.sin(t) * 0.3
-        self.blob_fish.y += math.cos(t * 0.6) * 0.2
-        self.blob_fish.tail_angle = math.sin(t * 2) * 0.1
+        # Update shark with hunting behavior
+        if self.shark:
+            # Find nearest fish
+            nearest_fish = None
+            nearest_dist = float('inf')
+            
+            for fish in self.fish:
+                dx = fish.x - self.shark.x
+                dy = fish.y - self.shark.y
+                dist = math.sqrt(dx * dx + dy * dy)
+                
+                if dist < nearest_dist and dist < self.shark_hunt_range:
+                    nearest_dist = dist
+                    nearest_fish = fish
+            
+            if nearest_fish:
+                # Hunt nearest fish
+                dx = nearest_fish.x - self.shark.x
+                dy = nearest_fish.y - self.shark.y
+                dist = math.sqrt(dx * dx + dy * dy)
+                
+                self.shark.vx += (dx/dist) * self.shark_base_speed * movement_scale
+                self.shark.vy += (dy/dist) * self.shark_base_speed * movement_scale
+            else:
+                # Wander behavior
+                dx = self.shark.target_x - self.shark.x
+                dy = self.shark.target_y - self.shark.y
+                dist = math.sqrt(dx * dx + dy * dy)
+                
+                if dist < 30 or random.random() < 0.02:
+                    angle = random.uniform(0, 2 * math.pi)
+                    radius = random.uniform(100, 400)
+                    self.shark.target_x = (self.width/2 + math.cos(angle) * radius) % self.width
+                    self.shark.target_y = (self.height/2 + math.sin(angle) * radius) % self.height
+                
+                if dist > 0:
+                    self.shark.vx += (dx/dist) * self.shark_base_speed * movement_scale * 0.5
+                    self.shark.vy += (dy/dist) * self.shark_base_speed * movement_scale * 0.5
+            
+            # Update shark position and animation
+            speed = math.sqrt(self.shark.vx * self.shark.vx + self.shark.vy * self.shark.vy)
+            if speed > self.shark_base_speed:
+                self.shark.vx = (self.shark.vx/speed) * self.shark_base_speed
+                self.shark.vy = (self.shark.vy/speed) * self.shark_base_speed
+            
+            self.shark.x = (self.shark.x + self.shark.vx) % self.width
+            self.shark.y = (self.shark.y + self.shark.vy) % self.height
+            self.shark.vx *= 0.98
+            self.shark.vy *= 0.98
+            self.shark.phase += speed * 0.1
+            self.shark.tail_angle = math.sin(self.shark.phase) * 0.2
 
-        # Update shark
-        self.shark.hunt_cooldown -= elapsed
-        
-        # Find closest fish for shark to hunt
-        closest_fish = None
-        closest_dist = float('inf')
-        
-        for fish in self.fish:
-            dx = fish.x - self.shark.x
-            dy = fish.y - self.shark.y
-            dist = dx * dx + dy * dy  # Square distance for performance
-            
-            if dist < closest_dist:
-                closest_dist = dist
-                closest_fish = fish
-
-        # Shark movement
-        if closest_fish and closest_dist < self.shark_hunt_range * self.shark_hunt_range:
-            # Hunt mode
-            dx = closest_fish.x - self.shark.x
-            dy = closest_fish.y - self.shark.y
-            dist = math.sqrt(closest_dist)
-            
-            # Apply hunting velocity
-            self.shark.apply_velocity(dx, dy, dist, is_hunting=True)
-            
-            # Check if shark catches fish
-            if closest_dist < self.shark_eat_range * self.shark_eat_range and self.shark.hunt_cooldown <= 0:
-                self.fish.remove(closest_fish)
-                self.shark.energy = min(self.shark.energy + 50, 200)
-                self.shark.hunt_cooldown = self.shark_hunt_cooldown
-        else:
-            # Normal wandering
-            dx = self.shark.target_x - self.shark.x
-            dy = self.shark.target_y - self.shark.y
-            dist = math.sqrt(dx * dx + dy * dy)
-            
-            if dist < 50 or random.random() < 0.01:
-                self.shark.target_x = random.uniform(0, self.width)
-                self.shark.target_y = random.uniform(0, self.height)
-            
-            self.shark.apply_velocity(dx, dy, dist)
-
-        # Update shark position
-        movement_scale = min(elapsed * 60, 2.0)
-        self.shark.x = (self.shark.x + self.shark.vx * movement_scale) % self.width
-        self.shark.y = (self.shark.y + self.shark.vy * movement_scale) % self.height
-        
-        # Shark animation
-        speed = math.sqrt(self.shark.vx * self.shark.vx + self.shark.vy * self.shark.vy)
-        self.shark.phase += speed * 0.1 * min(elapsed * 60, 2.0)
-        self.shark.tail_angle = math.sin(self.shark.phase) * (0.2 + min(speed / self.shark.max_speed, 1) * 0.3)
-        
-        # Shark energy decay
-        self.shark.energy -= 0.05 * elapsed
-        if self.shark.energy < 50:  # Shark gets hungrier
-            self.shark.max_speed *= 1.2  # Temporary speed boost when hungry
-            
-        # Update squid with more dynamic movement
+        # Update squid with dynamic movement
         if self.squid:
             # Random dash initiation
-            if self.squid_dash_timer <= 0 and random.random() < 0.02:  # 2% chance per update
+            if self.squid_dash_timer <= 0 and random.random() < 0.01:
                 self.squid_dash_timer = self.squid_dash_duration
-                # Set new target during dash
                 angle = random.uniform(0, 2 * math.pi)
                 radius = random.uniform(200, 400)
                 self.squid.target_x = (self.width/2 + math.cos(angle) * radius) % self.width
@@ -822,53 +770,46 @@ class FishSim:
             is_dashing = self.squid_dash_timer > 0
             self.squid_dash_timer = max(0, self.squid_dash_timer - elapsed)
             
-            # More dynamic movement
+            # Movement logic
             dx = self.squid.target_x - self.squid.x
             dy = self.squid.target_y - self.squid.y
             dist = math.sqrt(dx * dx + dy * dy)
             
-            # Change target more frequently for more active movement
-            if dist < 50 or random.random() < 0.03:
+            # Change target occasionally
+            if dist < 30 or random.random() < 0.02:
                 angle = random.uniform(0, 2 * math.pi)
                 radius = random.uniform(100, 300)
                 self.squid.target_x = (self.width/2 + math.cos(angle) * radius) % self.width
                 self.squid.target_y = (self.height/2 + math.sin(angle) * radius) % self.height
             
-            # Apply movement with enhanced speed during dash
-            self.squid.apply_velocity(dx, dy, dist, is_dashing=is_dashing)
+            # Apply movement
+            if dist > 0:
+                acc = self.squid_base_speed * (2.0 if is_dashing else 1.0) * movement_scale
+                self.squid.vx += (dx/dist) * acc
+                self.squid.vy += (dy/dist) * acc
             
-            # Update position with smoother movement
-            movement_scale = 1.5 if is_dashing else 1.0
-            self.squid.x = (self.squid.x + self.squid.vx * movement_scale) % self.width
-            self.squid.y = (self.squid.y + self.squid.vy * movement_scale) % self.height
-            
-            # More dynamic tentacle animation
+            # Cap speed
             speed = math.sqrt(self.squid.vx * self.squid.vx + self.squid.vy * self.squid.vy)
+            max_speed = self.squid_base_speed * (2.0 if is_dashing else 1.0)
+            if speed > max_speed:
+                self.squid.vx = (self.squid.vx/speed) * max_speed
+                self.squid.vy = (self.squid.vy/speed) * max_speed
+            
+            # Update position and animation
+            self.squid.x = (self.squid.x + self.squid.vx) % self.width
+            self.squid.y = (self.squid.y + self.squid.vy) % self.height
+            self.squid.vx *= 0.97
+            self.squid.vy *= 0.97
             self.squid.tentacle_phase += speed * 0.2
-            
-            # Smoother deceleration
-            drag = 0.97 if is_dashing else 0.98
-            self.squid.vx *= drag
-            self.squid.vy *= drag
 
-        # Fix movement scaling for all entities
-        movement_scale = 1.0  # Use fixed movement scale
-        
-        # Update fish positions with fixed scaling
-        for fish in self.fish:
-            fish.x = (fish.x + fish.vx * movement_scale) % self.width
-            fish.y = (fish.y + fish.vy * movement_scale) % self.height
-            
-            # Apply consistent drag
-            fish.vx *= 0.98
-            fish.vy *= 0.98
-        
-        # Update shark position with fixed scaling
-        if self.shark:
-            self.shark.x = (self.shark.x + self.shark.vx * movement_scale) % self.width
-            self.shark.y = (self.shark.y + self.shark.vy * movement_scale) % self.height
-            self.shark.vx *= 0.98
-            self.shark.vy *= 0.98
+        # Adjust broadcast rate based on client count
+        client_count = len(self.connected_clients)
+        if client_count > 100:
+            self.broadcast_throttle = 0.05  # 20 FPS for high load
+        elif client_count > 50:
+            self.broadcast_throttle = 0.033  # 30 FPS for medium load
+        else:
+            self.broadcast_throttle = 0.016  # 60 FPS for low load
 
         return []
 
