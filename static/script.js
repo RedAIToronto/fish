@@ -145,11 +145,10 @@ function connectWebSocket() {
                 }
             });
             
-            // Draw effects
-            drawEffects(ctx);
-            
-            // Update data panel
-            updateDataPanel(state.fish, state.food.length);
+            // Draw shark
+            if (state.shark) {
+                drawShark(state.shark);
+            }
             
             // Draw blob fish
             if (state.blob_fish) {
@@ -157,6 +156,12 @@ function connectWebSocket() {
                 drawDevThought(ctx, state.blob_fish);
                 updateDevPanel(state.blob_fish.thought);
             }
+            
+            // Draw effects
+            drawEffects(ctx);
+            
+            // Update data panel
+            updateDataPanel(state.fish, state.food.length);
             
         } catch (error) {
             console.error('Error handling message:', error);
@@ -723,4 +728,70 @@ function createViewerDisplay() {
     display.className = 'viewer-count';
     document.querySelector('.container').prepend(display);
     return display;
+}
+
+function drawShark(shark) {
+    ctx.save();
+    ctx.translate(shark.x, shark.y);
+
+    const direction = shark.vx >= 0 ? 1 : -1;
+    ctx.scale(direction, 1);
+
+    // Shadow for depth
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 20;
+
+    // Shark body gradient
+    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 80);  // Much bigger
+    const baseColor = shark.color.map(c => c * 255);
+    gradient.addColorStop(0, `rgba(${baseColor.join(',')}, 1)`);
+    gradient.addColorStop(1, `rgba(${baseColor.map(c => c * 0.7).join(',')}, 1)`);
+    ctx.fillStyle = gradient;
+
+    // Main body (much larger)
+    ctx.beginPath();
+    ctx.moveTo(-80, 0);  // Bigger
+    ctx.quadraticCurveTo(0, -60, 80, 0);  // Bigger
+    ctx.quadraticCurveTo(0, 60, -80, 0);  // Bigger
+    ctx.fill();
+
+    // Dorsal fin
+    ctx.beginPath();
+    ctx.moveTo(0, -60);
+    ctx.quadraticCurveTo(30, -100, 50, -60);
+    ctx.quadraticCurveTo(25, -50, 0, -60);
+    ctx.fill();
+
+    // Tail
+    ctx.save();
+    ctx.translate(-80, 0);
+    ctx.rotate(shark.tail_angle);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-60, -50, -80, 0);
+    ctx.quadraticCurveTo(-60, 50, 0, 0);
+    ctx.fill();
+    ctx.restore();
+
+    // Eye (more menacing)
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.arc(40, -20, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'black';
+    ctx.beginPath();
+    ctx.arc(44, -20, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Gills
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 4;
+    for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(-30 + i * 20, -30);
+        ctx.lineTo(-30 + i * 20, 20);
+        ctx.stroke();
+    }
+
+    ctx.restore();
 }

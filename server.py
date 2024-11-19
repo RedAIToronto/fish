@@ -131,11 +131,50 @@ class BlobFish:
         self.think_timer = random.uniform(5, 10)  # Thinks more often
 
 
+@dataclass
+class Shark:
+    x: float
+    y: float
+    vx: float = 0
+    vy: float = 0
+    size: float = 4.0  # Much bigger than before
+    energy: float = 200
+    color: list = None
+    tail_angle: float = 0
+    target_x: float = 0
+    target_y: float = 0
+    phase: float = 0
+    hunt_cooldown: float = 0
+    max_speed: float = 6.0  # Faster
+    acceleration: float = 0.25  # More responsive
+
+    def __post_init__(self):
+        self.color = [0.2, 0.2, 0.7]  # Darker blue for shark
+        self.target_x = random.uniform(0, 1200)
+        self.target_y = random.uniform(0, 800)
+        self.phase = random.uniform(0, 2 * math.pi)
+
+    def apply_velocity(self, dx, dy, dist, is_hunting=False):
+        """Handle velocity changes with speed cap"""
+        if dist > 0:
+            acc = self.acceleration * (1.5 if is_hunting else 1.0)
+            self.vx += (dx / dist) * acc
+            self.vy += (dy / dist) * acc
+            
+            current_speed = math.sqrt(self.vx * self.vx + self.vy * self.vy)
+            max_speed = self.max_speed * (1.5 if is_hunting else 1.0)
+            
+            if current_speed > max_speed:
+                ratio = max_speed / current_speed
+                self.vx *= ratio
+                self.vy *= ratio
+
+
 class AIHelper:
     def __init__(self):
         self.client = anthropic.Anthropic()
         logger.info("AIHelper initialized with Anthropic client")
-        self.system_prompt = """You are a fish in an aquarium. Respond with ONLY 2-3 WORDS and an emoji that perfectly matches the current state.
+        self.system_prompt = """You are a fish in an aquarium. Respond with 3-5 WORDS and matching emojis that perfectly capture your current state and personality.
         
         Consider these states carefully:
         - If energy < 30: Show distress about dying/hunger
@@ -145,11 +184,11 @@ class AIHelper:
         - If speed < 1: Express tiredness/laziness
         
         Example responses for different states:
-        Low energy: "💀 dying... help!" or "😫 need food badly"
-        High energy: "😊 feeling great!" or "🌟 so energetic"
-        Near food: "🍽️ food spotted!" or "😋 yummy ahead"
-        High speed: " zoom zoom!" or "💨 super fast"
-        Low speed: "😴 so sleepy" or "🦥 just floating"
+        Low energy: "💀 desperately need food now!" or "😫 starving... help me!"
+        High energy: "😊 living my best life!" or "🌟 feeling absolutely fabulous!"
+        Near food: "🍽️ ooh snacks spotted ahead!" or "😋 yummy food incoming!"
+        High speed: "💨 zooming like lightning!" or "🏃 catch me if you can!"
+        Low speed: "😴 just chilling here" or "🦥 lazy day today friends"
         """
         
     async def get_response(self, fish_data):
@@ -204,25 +243,35 @@ class DevAIHelper:
         self.last_stats = None
         self.last_report_time = time.time()
         self.report_interval = 30  # Generate report every 30 seconds
-        self.brief_prompt = """You are a cute dev blob fish (with glasses) studying your aquarium.
-        KEEP RESPONSES UNDER 50 CHARS! Focus on immediate observations.
+        self.brief_prompt = """You are a cute, nerdy dev blob fish (with glasses) studying your aquarium ecosystem. You're passionate about your research but also quirky and fun.
+        KEEP RESPONSES UNDER 100 CHARS! Mix observations with personality. Include emojis and actions.
         
         Examples:
-        "🤓 *notes* Fish #12 swimming erratically"
-        "📊 Observing feeding patterns..."
-        "🔬 Studying group dynamics"
-        "🧪 Monitoring energy levels"
+        "🤓 *pushes up glasses* Fascinating energy patterns in specimen #12!"
+        "📊 *scribbles notes excitedly* Peak performance observed!"
+        "🔬 *gasps* These social dynamics are revolutionary!"
+        "🧪 *drops clipboard* Extraordinary feeding behavior!"
+        "🎓 *adjusts lab coat* Remarkable adaptation patterns..."
+        "📝 *happy wiggle* My research is progressing nicely!"
         """
         
-        self.report_prompt = """You are a scientist blob fish writing a brief research report about your aquarium ecosystem.
-        Write ONE short paragraph (max 200 chars) analyzing:
-        - Fish behavior patterns
-        - Population dynamics
-        - Energy distribution
-        - Social interactions
-        - Ecosystem stability
+        self.report_prompt = """You are Dr. Blob, a brilliant but adorably eccentric scientist blob fish studying your aquarium ecosystem. You're passionate about marine behavioral science and get super excited about your findings.
+
+        Write ONE engaging paragraph (max 300 chars) analyzing:
+        - Use fun scientific terminology
+        - Mix serious observations with cute reactions
+        - Reference previous observations when relevant
+        - Add personality quirks (adjusting glasses, excited wiggles, etc)
+        - Include multiple relevant emojis
+        - Make hypotheses about behavior patterns
+        - Express excitement about discoveries
         
-        Use academic but cute tone. Include emoji. Sign as "Dr. Blob".
+        Sign as "Dr. Blob" with a cute title.
+        
+        Example:
+        "🔬 *adjusts glasses excitedly* Groundbreaking findings! Population dynamics show remarkable stability, with specimens exhibiting fascinating social hierarchies! Energy distribution patterns suggest emergent swarm intelligence! *happy wiggle* Simply extraordinary! 🧪✨
+        
+        - Dr. Blob, PhD in Aquatic Cuteness 🎓"
         """
 
     async def get_response(self, fish_stats):
@@ -354,7 +403,16 @@ class FishSim:
         # Connection handling
         self.active_connections = set()
         self.connection_lock = asyncio.Lock()
-
+        angle = random.uniform(0, 2 * math.pi)
+        radius = 300  # Start shark away from center
+        self.shark = Shark(
+            self.width/2 + math.cos(angle) * radius,
+            self.height/2 + math.sin(angle) * radius
+        )
+        self.shark_hunt_range = 300  # Increased range
+        self.shark_eat_range = 30   # Increased eat range
+        self.shark_hunt_cooldown = 2.0  # Shorter cooldown
+        
     async def start_ai_processor(self):
         """Start the AI processor as a background task"""
         if self.ai_processor is None:
@@ -634,6 +692,64 @@ class FishSim:
         self.blob_fish.y += math.cos(t * 0.6) * 0.2
         self.blob_fish.tail_angle = math.sin(t * 2) * 0.1
 
+        # Update shark
+        self.shark.hunt_cooldown -= elapsed
+        
+        # Find closest fish for shark to hunt
+        closest_fish = None
+        closest_dist = float('inf')
+        
+        for fish in self.fish:
+            dx = fish.x - self.shark.x
+            dy = fish.y - self.shark.y
+            dist = dx * dx + dy * dy  # Square distance for performance
+            
+            if dist < closest_dist:
+                closest_dist = dist
+                closest_fish = fish
+
+        # Shark movement
+        if closest_fish and closest_dist < self.shark_hunt_range * self.shark_hunt_range:
+            # Hunt mode
+            dx = closest_fish.x - self.shark.x
+            dy = closest_fish.y - self.shark.y
+            dist = math.sqrt(closest_dist)
+            
+            # Apply hunting velocity
+            self.shark.apply_velocity(dx, dy, dist, is_hunting=True)
+            
+            # Check if shark catches fish
+            if closest_dist < self.shark_eat_range * self.shark_eat_range and self.shark.hunt_cooldown <= 0:
+                self.fish.remove(closest_fish)
+                self.shark.energy = min(self.shark.energy + 50, 200)
+                self.shark.hunt_cooldown = self.shark_hunt_cooldown
+        else:
+            # Normal wandering
+            dx = self.shark.target_x - self.shark.x
+            dy = self.shark.target_y - self.shark.y
+            dist = math.sqrt(dx * dx + dy * dy)
+            
+            if dist < 50 or random.random() < 0.01:
+                self.shark.target_x = random.uniform(0, self.width)
+                self.shark.target_y = random.uniform(0, self.height)
+            
+            self.shark.apply_velocity(dx, dy, dist)
+
+        # Update shark position
+        movement_scale = min(elapsed * 60, 2.0)
+        self.shark.x = (self.shark.x + self.shark.vx * movement_scale) % self.width
+        self.shark.y = (self.shark.y + self.shark.vy * movement_scale) % self.height
+        
+        # Shark animation
+        speed = math.sqrt(self.shark.vx * self.shark.vx + self.shark.vy * self.shark.vy)
+        self.shark.phase += speed * 0.1 * min(elapsed * 60, 2.0)
+        self.shark.tail_angle = math.sin(self.shark.phase) * (0.2 + min(speed / self.shark.max_speed, 1) * 0.3)
+        
+        # Shark energy decay
+        self.shark.energy -= 0.05 * elapsed
+        if self.shark.energy < 50:  # Shark gets hungrier
+            self.shark.max_speed *= 1.2  # Temporary speed boost when hungry
+            
         return []
 
     async def handle_ai_command(self, message):
@@ -653,7 +769,7 @@ class FishSim:
             current_time - self.state_cache_time < self.state_cache_duration):
             return self.state_cache
 
-        viewer_count = len(self.unique_ips)  # Use unique IPs instead of connections
+        viewer_count = len(self.unique_ips)
         
         state = {
             'fish': [{
@@ -673,7 +789,17 @@ class FishSim:
                 'width': self.width,
                 'height': self.height
             },
-            'viewer_count': viewer_count if viewer_count >= 5 else 0  # Only show if ≥ 5 viewers
+            'viewer_count': viewer_count if viewer_count >= 5 else 0,
+            'shark': {
+                'x': self.shark.x,
+                'y': self.shark.y,
+                'vx': self.shark.vx,
+                'vy': self.shark.vy,
+                'tail_angle': self.shark.tail_angle,
+                'energy': self.shark.energy,
+                'color': self.shark.color,
+                'size': self.shark.size
+            }
         }
         
         if self.blob_fish:
