@@ -286,7 +286,7 @@ class FishSim:
         self.ai_queue = asyncio.Queue()
         self.max_queue_size = 2
         self.last_ai_call = 0
-        self.min_ai_interval = 5.0
+        self.min_ai_interval = 3.0
         self.ai_processor = None  # Will be initialized later
         self.state_file = "fish_state.json"
         self.load_state()  # Load saved state on startup
@@ -302,9 +302,9 @@ class FishSim:
         self.min_fish = 10  # Minimum fish to maintain
         self.connected_clients = set()  # Change to store client IDs instead of WebSocket objects
         self.unique_ips = set()  # New: Track unique IPs
-        self.think_batch_size = 3  # New: Process thoughts in batches
-        self.update_interval = 0.05  # Faster base update rate (20fps)
-        self.broadcast_throttle = 0.05  # Faster broadcast rate
+        self.think_batch_size = 2  # New: Process thoughts in batches
+        self.update_interval = 0.1  # Slower updates for stability
+        self.broadcast_throttle = 0.1  # Slower broadcasts
         self.last_broadcast = time.time()
         self.max_clients_per_ip = 3  # Limit connections per IP
         self.ip_connections = {}  # Track connections per IP
@@ -316,7 +316,10 @@ class FishSim:
         self.high_load_mode = False
         self.load_check_interval = 5.0  # Check load every 5 seconds
         self.last_load_check = time.time()
-        self.high_load_threshold = 50  # Number of clients that triggers high load mode
+        self.high_load_threshold = 20  # Lower threshold for high load mode
+        self.shared_update_time = time.time()  # New: shared time for all clients
+        self.shared_state = None  # New: shared state for all clients
+        self.state_update_interval = 0.1  # New: how often to update shared state
 
     async def start_ai_processor(self):
         """Start the AI processor as a background task"""
@@ -433,20 +436,25 @@ class FishSim:
     async def update(self):
         """Optimized update loop"""
         current_time = time.time()
-        elapsed = current_time - self.last_update
-        self.last_update = current_time
         
-        # Check system load
-        if current_time - self.last_load_check > self.load_check_interval:
-            self.high_load_mode = len(self.connected_clients) > self.high_load_threshold
-            self.last_load_check = current_time
-        
-        # Process food queue
-        await self.process_food_queue()
-        
+        # Only update state if enough time has passed
+        if current_time - self.shared_update_time < self.state_update_interval:
+            return self.shared_state or []
+
+        self.shared_update_time = current_time
+        elapsed = self.state_update_interval  # Use fixed time step
+
+        # Queue AI thoughts less aggressively
+        if self.ai_queue.qsize() < self.max_queue_size:
+            thinking_candidates = [f for f in self.fish if f.think_timer <= 0]
+            if thinking_candidates:
+                fish = random.choice(thinking_candidates)
+                await self.ai_queue.put(('fish', fish, None))
+                fish.think_timer = random.uniform(15, 30)  # Shorter think timer
+
         # Regular simulation updates
         for fish in self.fish:
-            fish.think_timer -= elapsed  # Use actual elapsed time
+            fish.think_timer -= elapsed
             
             # Natural swimming behavior
             dx = fish.target_x - fish.x
@@ -511,7 +519,22 @@ class FishSim:
         self.blob_fish.y += math.cos(time.time() * 0.3) * 0.2
         self.blob_fish.tail_angle = math.sin(time.time()) * 0.1
 
-        return []  # Return empty code updates as they're not used
+        # Update blob fish thoughts less frequently
+        if (current_time - self.last_blob_thought_time > 10 and  # Increased interval
+            self.ai_queue.qsize() < self.max_queue_size):
+            
+            fish_stats = [{
+                'id': str(id(f)),
+                'energy': f.energy,
+                'speed': (f.vx**2 + f.vy**2)**0.5,
+                'is_dying': f.energy < 30
+            } for f in self.fish]
+            
+            await self.ai_queue.put(('blob', self.blob_fish, fish_stats))
+            self.last_blob_thought_time = current_time
+
+        self.shared_state = []  # Store result
+        return self.shared_state
 
     async def handle_ai_command(self, message):
         state = {
@@ -675,26 +698,35 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     current_time = time.time()
                     if current_time - last_broadcast >= sim.broadcast_throttle:
-                        await sim.update()  # Run simulation update
+                        # Use shared state update
+                        await sim.update()
                         state = await sim.get_state()
                         await websocket.send_json(state)
                         last_broadcast = current_time
-                    await asyncio.sleep(0.01)  # Small sleep to prevent CPU hogging
+                        
+                        # Adaptive sleep based on load
+                        if len(sim.connected_clients) > sim.high_load_threshold:
+                            await asyncio.sleep(0.2)  # Longer sleep under load
+                        else:
+                            await asyncio.sleep(0.1)
                 except Exception as e:
                     logger.error(f"Broadcast error: {e}")
                     break
 
         async def receive_loop():
+            food_cooldown = 0
             while True:
                 try:
                     data = await websocket.receive_json()
+                    current_time = time.time()
+                    
                     if data['type'] == 'add_food':
-                        await sim.add_food(
-                            data['x'],
-                            data['y'],
-                            client_id,
-                            client_ip
-                        )
+                        # Stricter rate limiting under load
+                        min_cooldown = 2.0 if len(sim.connected_clients) > sim.high_load_threshold else 1.0
+                        
+                        if current_time - food_cooldown >= min_cooldown:
+                            await sim.add_food(data['x'], data['y'], client_id, client_ip)
+                            food_cooldown = current_time
                 except Exception as e:
                     logger.error(f"Receive error: {e}")
                     break
