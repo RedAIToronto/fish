@@ -1,9 +1,21 @@
 services:
   - type: web
-    name: neural-fish
+    name: fish
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python server.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.0
+      - key: WS_MAX_SIZE
+        value: 1048576
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains

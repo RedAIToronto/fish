@@ -607,4 +607,12 @@ async def websocket_endpoint(websocket: WebSocket):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("server:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run(
+        "server:app", 
+        host="0.0.0.0", 
+        port=port, 
+        reload=True,
+        ssl_keyfile=os.environ.get("SSL_KEYFILE"),
+        ssl_certfile=os.environ.get("SSL_CERTFILE"),
+        ws_max_size=1024*1024  # 1MB max message size
+    )

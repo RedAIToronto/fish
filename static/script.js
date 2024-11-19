@@ -19,7 +19,11 @@ const reconnectDelay = 1000;
 
 // Initialize WebSocket connection
 function connectWebSocket() {
-    ws = new WebSocket(`ws://${window.location.host}/ws`);
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    console.log('Connecting to WebSocket:', wsUrl);
+    
+    ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
         console.log('WebSocket connected');
