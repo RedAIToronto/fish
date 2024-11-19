@@ -242,36 +242,38 @@ class DevAIHelper:
         self.client = anthropic.Anthropic()
         self.last_stats = None
         self.last_report_time = time.time()
-        self.report_interval = 30  # Generate report every 30 seconds
-        self.brief_prompt = """You are a cute, nerdy dev blob fish (with glasses) studying your aquarium ecosystem. You're passionate about your research but also quirky and fun.
-        KEEP RESPONSES UNDER 100 CHARS! Mix observations with personality. Include emojis and actions.
+        self.report_interval = 30
+        self.brief_prompt = """You are Dr. Blob, a cute but brilliant scientist blob fish studying the $FISH Neural Network Aquarium. You're passionate about marine behavioral science and cryptocurrency.
+        KEEP RESPONSES UNDER 150 CHARS! Mix observations with personality and crypto enthusiasm.
         
         Examples:
-        "🤓 *pushes up glasses* Fascinating energy patterns in specimen #12!"
-        "📊 *scribbles notes excitedly* Peak performance observed!"
-        "🔬 *gasps* These social dynamics are revolutionary!"
-        "🧪 *drops clipboard* Extraordinary feeding behavior!"
-        "🎓 *adjusts lab coat* Remarkable adaptation patterns..."
-        "📝 *happy wiggle* My research is progressing nicely!"
+        "🤓 *adjusts glasses* Fascinating! $FISH token holders will love these neural patterns!"
+        "📊 *scribbles excitedly* Bullish on these specimen interactions!"
+        "🔬 *wiggles* Our shark integration is performing exceptionally!"
+        "🧪 *drops clipboard* The ecosystem's tokenomics are thriving!"
+        "🎓 *happy bounce* Can't wait to add more predators to study!"
         """
         
-        self.report_prompt = """You are Dr. Blob, a brilliant but adorably eccentric scientist blob fish studying your aquarium ecosystem. You're passionate about marine behavioral science and get super excited about your findings.
+        self.report_prompt = """You are Dr. Blob, a brilliant but adorably eccentric scientist blob fish studying the $FISH Neural Network Aquarium. You're the lead researcher on this revolutionary crypto-marine project that combines AI, blockchain, and marine biology.
 
-        Write ONE engaging paragraph (max 300 chars) analyzing:
+        Write ONE detailed report (max 500 chars) that includes:
+        - Analysis of current ecosystem state
+        - Commentary on recent updates (like the shark addition)
+        - Excitement about future features (like potential squid)
+        - References to $FISH token and community
         - Use fun scientific terminology
-        - Mix serious observations with cute reactions
-        - Reference previous observations when relevant
+        - Mix serious analysis with cute reactions
         - Add personality quirks (adjusting glasses, excited wiggles, etc)
         - Include multiple relevant emojis
         - Make hypotheses about behavior patterns
-        - Express excitement about discoveries
-        
-        Sign as "Dr. Blob" with a cute title.
+        - Express enthusiasm about the project's growth
         
         Example:
-        "🔬 *adjusts glasses excitedly* Groundbreaking findings! Population dynamics show remarkable stability, with specimens exhibiting fascinating social hierarchies! Energy distribution patterns suggest emergent swarm intelligence! *happy wiggle* Simply extraordinary! 🧪✨
+        "🔬 *adjusts glasses excitedly* GROUNDBREAKING DEVELOPMENTS! Our recent shark integration has dramatically altered ecosystem dynamics! *happy wiggle* 
+        Specimen interactions show remarkable adaptation to predator presence. $FISH holders will be thrilled with these neural network improvements! 
+        *scribbles frantically* Already hypothesizing about squid implementation... The possibilities! 🦈🧬✨
         
-        - Dr. Blob, PhD in Aquatic Cuteness 🎓"
+        - Dr. Blob, Chief Marine Cryptologist 🎓"
         """
 
     async def get_response(self, fish_stats):
@@ -280,53 +282,53 @@ class DevAIHelper:
             'population': len(fish_stats),
             'dying_count': sum(1 for f in fish_stats if f['energy'] < 30),
             'active_count': sum(1 for f in fish_stats if f['speed'] > 3),
-            'avg_energy': sum(f['energy'] for f in fish_stats)/len(fish_stats)
+            'avg_energy': sum(f['energy'] for f in fish_stats)/len(fish_stats),
+            'has_shark': True,  # Let the AI know about the shark
+            'future_plans': ['squid', 'more predators'],  # Hint at future updates
+            'project_type': '$FISH Neural Network Aquarium'
         }
 
-        # Decide if it's time for a report
         is_report_time = current_time - self.last_report_time > self.report_interval
 
         try:
             if is_report_time:
-                # Generate detailed report
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self.client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-                        max_tokens=400,
+                        model="claude-3-5-sonnet-20241022",
+                        max_tokens=800,  # Increased token limit
                         temperature=0.9,
                         system=self.report_prompt,
                         messages=[{
                             "role": "user",
-                            "content": f"Current ecosystem state: {current_stats['population']} specimens, {current_stats['dying_count']} critical, {current_stats['active_count']} active, average energy {current_stats['avg_energy']:.1f}"
+                            "content": f"Current ecosystem state: {current_stats['population']} specimens, {current_stats['dying_count']} critical, {current_stats['active_count']} active, average energy {current_stats['avg_energy']:.1f}. Recent addition: Shark predator. Future plans: Squid and more predators. Project: $FISH Neural Network Aquarium with AI-powered behaviors."
                         }]
                     )
                 )
                 self.last_report_time = current_time
             else:
-                # Generate quick observation
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self.client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-                        max_tokens=80,
+                        model="claude-3-5-sonnet-20241022",
+                        max_tokens=200,  # Increased for brief observations too
                         temperature=0.9,
                         system=self.brief_prompt,
                         messages=[{
                             "role": "user",
-                            "content": f"Observing: {current_stats['dying_count']} critical fish, {current_stats['active_count']} active"
+                            "content": f"Observing: {current_stats['dying_count']} critical fish, {current_stats['active_count']} active, shark present, $FISH token ecosystem"
                         }]
                     )
                 )
 
             thought = str(response.content[0].text if isinstance(response.content, list) else response.content)
-            return thought[:200 if is_report_time else 50]  # Limit length based on type
+            return thought[:500 if is_report_time else 150]  # Increased length limits
             
         except Exception as e:
             logger.error(f"Dev blob fish error: {str(e)}")
             if current_stats['dying_count'] > 0:
-                return "🤓 *concerned* Monitoring critical specimens..."
-            return "🔬 *adjusts glasses* Continuing observations..."
+                return "🤓 *concerned* Critical specimens need attention! $FISH holders, send food!"
+            return "🔬 *adjusts glasses* Monitoring our growing ecosystem... Bullish! 📈"
 
 
 class FishSim:
