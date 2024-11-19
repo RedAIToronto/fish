@@ -154,9 +154,9 @@ class AIHelper:
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: self.client.messages.create(
-                    model="claude-3-sonnet-20240229",
-                    max_tokens=20,
-                    temperature=0.9,
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=30,
+                    temperature=0.5,
                     system=self.system_prompt,
                     messages=[
                         {
@@ -180,33 +180,37 @@ class DevAIHelper:
     def __init__(self):
         self.client = anthropic.Anthropic()
         self.last_stats = None
-        self.system_prompt = """You are a cute dev blob fish managing a $FISH token aquarium. You care deeply about your fish and token holders.
-        KEEP ALL RESPONSES UNDER 50 CHARACTERS! Be engaging and strategic.
-        
-        Key behaviors:
-        1. When fish are dying/hungry:
-        - Urge viewers to click to feed fish
-        - Remind about $FISH token utility for feeding
-        
-        2. When ecosystem is healthy:
-        - Thank holders for participation
-        - Hint at upcoming features
-        - Comment on token value/stability
-        
-        3. When population changes:
-        - Link it to token supply mechanics
-        - Encourage holder participation
+        self.last_report_time = time.time()
+        self.report_interval = 30  # Generate report every 30 seconds
+        self.brief_prompt = """You are a cute dev blob fish (with glasses) studying your aquarium.
+        KEEP RESPONSES UNDER 50 CHARS! Focus on immediate observations.
         
         Examples:
-        "🤓 Click to feed! Each fish = 1 $FISH!"
-        "📊 Low energy! Holders, we need food!"
-        "🎓 Healthy fish = strong tokenomics!"
-        "🧪 v2 breeding soon... stack $FISH!"
-        "💖 Thanks holders! Fish thriving!"
-        "🔬 Need food! Buy $FISH to feed!"
+        "🤓 *notes* Fish #12 swimming erratically"
+        "📊 Observing feeding patterns..."
+        "🔬 Studying group dynamics"
+        "🧪 Monitoring energy levels"
+        """
+        
+        self.report_prompt = """You are a scientist blob fish writing a brief research report about your aquarium ecosystem.
+        Write ONE short paragraph (max 200 chars) analyzing:
+        - Fish behavior patterns
+        - Population dynamics
+        - Energy distribution
+        - Social interactions
+        - Ecosystem stability
+        
+        Use academic but cute tone. Include emoji. Sign as "Dr. Blob".
+        
+        Example:
+        "🔬 Field Report: Observed fascinating schooling behavior among specimens. Energy levels show cyclical patterns 
+        correlating with feeding events. Population stable at optimal levels. Social dynamics indicate emergent intelligence.
+        
+        - Dr. Blob 🎓"
         """
 
     async def get_response(self, fish_stats):
+        current_time = time.time()
         current_stats = {
             'population': len(fish_stats),
             'dying_count': sum(1 for f in fish_stats if f['energy'] < 30),
@@ -214,38 +218,50 @@ class DevAIHelper:
             'avg_energy': sum(f['energy'] for f in fish_stats)/len(fish_stats)
         }
 
-        # Create more specific context based on state
-        context = ""
-        if current_stats['dying_count'] > 2:
-            context = "URGENT: Multiple fish need food! Encourage feeding"
-        elif current_stats['avg_energy'] < 50:
-            context = "Energy levels low, suggest buying $FISH for food"
-        elif current_stats['active_count'] > current_stats['population'] * 0.7:
-            context = "High activity, praise holders and hint at features"
-        elif random.random() < 0.3:  # Sometimes promote future plans
-            context = "Mention upcoming features and token utility"
-        else:
-            context = "Normal operation, focus on holder engagement"
+        # Decide if it's time for a report
+        is_report_time = current_time - self.last_report_time > self.report_interval
 
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.client.messages.create(
-     model="claude-3-5-sonnet-20241022",                    max_tokens=50,
-                    temperature=0.9,
-                    system=self.system_prompt,
-                    messages=[{
-                        "role": "user",
-                        "content": f"State: {context}. Stats: {current_stats['population']} fish, {current_stats['dying_count']} dying, avg energy {current_stats['avg_energy']:.1f}"
-                    }]
+            if is_report_time:
+                # Generate detailed report
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+                        max_tokens=200,
+                        temperature=0.9,
+                        system=self.report_prompt,
+                        messages=[{
+                            "role": "user",
+                            "content": f"Current ecosystem state: {current_stats['population']} specimens, {current_stats['dying_count']} critical, {current_stats['active_count']} active, average energy {current_stats['avg_energy']:.1f}"
+                        }]
+                    )
                 )
-            )
-            return str(response.content[0].text if isinstance(response.content, list) else response.content)[:50]
+                self.last_report_time = current_time
+            else:
+                # Generate quick observation
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+                        max_tokens=50,
+                        temperature=0.9,
+                        system=self.brief_prompt,
+                        messages=[{
+                            "role": "user",
+                            "content": f"Observing: {current_stats['dying_count']} critical fish, {current_stats['active_count']} active"
+                        }]
+                    )
+                )
+
+            thought = str(response.content[0].text if isinstance(response.content, list) else response.content)
+            return thought[:200 if is_report_time else 50]  # Limit length based on type
+            
         except Exception as e:
             logger.error(f"Dev blob fish error: {str(e)}")
             if current_stats['dying_count'] > 0:
-                return "🤓 *panics* Click to feed! Quick!"
-            return "🎓 *adjusts glasses* Buy $FISH!"
+                return "🤓 *concerned* Monitoring critical specimens..."
+            return "🔬 *adjusts glasses* Continuing observations..."
 
 
 class FishSim:

@@ -127,6 +127,87 @@
             color: #FAB0B0;
             opacity: 1;
         }
+        
+        .social-links {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+        }
+        
+        .social-link {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .social-link:hover {
+            transform: scale(1.1);
+            background: rgba(29, 155, 240, 0.8);  /* X blue */
+        }
+        
+        .docs-button {
+            background: rgba(74, 222, 128, 0.2);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+        }
+        
+        .docs-button:hover {
+            background: rgba(74, 222, 128, 0.3);
+        }
+        
+        .docs-popup {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            max-width: 600px;
+            background: rgba(0, 0, 0, 0.95);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 2000;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .docs-popup.active {
+            display: block;
+        }
+        
+        .docs-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            cursor: pointer;
+            padding: 5px;
+            font-size: 20px;
+            color: #666;
+        }
+        
+        .docs-close:hover {
+            color: #fff;
+        }
+        
+        .docs-content h2 {
+            color: #4ADE80;
+            border-bottom: 1px solid rgba(74, 222, 128, 0.3);
+            padding-bottom: 10px;
+            margin-top: 20px;
+        }
+        
+        .docs-content p {
+            color: #ccc;
+            line-height: 1.6;
+        }
     </style>
 </head>
 <body>
@@ -154,6 +235,47 @@
         </div>
     </div>
     <div id="thoughtLog" class="thought-log"></div>
+    <div class="social-links">
+        <a href="https://x.com/BLOB1247814" target="_blank" class="social-link">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </svg>
+        </a>
+        <div class="social-link docs-button" onclick="toggleDocs()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+                <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/>
+            </svg>
+        </div>
+    </div>
+    <div class="docs-popup" id="docsPopup">
+        <div class="docs-close" onclick="toggleDocs()">×</div>
+        <div class="docs-content">
+            <h2>🐠 About $FISH</h2>
+            <p>Welcome to the Neural Network Aquarium! This is a simulation of AI-powered fish that think, interact, and evolve.</p>
+            
+            <h2>🎮 How to Interact</h2>
+            <p>• Click anywhere in the tank to drop food<br>
+            • Watch fish thoughts in speech bubbles<br>
+            • Monitor energy levels and behavior<br>
+            • Follow Dr. Blob's scientific observations</p>
+            
+            <h2>🤓 Dev Blob</h2>
+            <p>The pink blob fish with glasses is Dr. Blob, our resident scientist. He studies the ecosystem and provides regular research updates.</p>
+            
+            <h2>🔬 Fish Behavior</h2>
+            <p>Each fish has:<br>
+            • Energy levels that deplete over time<br>
+            • Unique swimming patterns<br>
+            • AI-powered thoughts and reactions<br>
+            • Social interactions with other fish</p>
+        </div>
+    </div>
     <script src="/static/script.js"></script>
+    <script>
+    function toggleDocs() {
+        const popup = document.getElementById('docsPopup');
+        popup.classList.toggle('active');
+    }
+    </script>
 </body>
 </html>

@@ -166,18 +166,29 @@ function createVectorDisplay(vx, vy) {
 function addThought(fish) {
     if (!fish.thought) return;
     
-    // Check if this thought is already displayed
-    const existingThoughts = Array.from(thoughtLog.children);
-    const isDuplicate = existingThoughts.some(entry => 
-        entry.textContent.includes(fish.thought)
-    );
+    const currentTime = Date.now();
     
-    if (isDuplicate) return;
+    // Clean old thoughts from cache
+    for (const [key, time] of thoughtCache) {
+        if (currentTime - time > THOUGHT_CACHE_DURATION) {
+            thoughtCache.delete(key);
+        }
+    }
+    
+    // Create unique key for this thought
+    const thoughtKey = `${fish.id}-${fish.thought}`;
+    
+    // Check if this thought was recently displayed
+    if (thoughtCache.has(thoughtKey)) {
+        return;
+    }
+    
+    // Add to cache
+    thoughtCache.set(thoughtKey, currentTime);
     
     const thoughtEntry = document.createElement('div');
     thoughtEntry.className = 'thought-entry';
     
-    // Format timestamp
     const time = new Date().toLocaleTimeString('en-US', { 
         hour12: false, 
         hour: '2-digit', 
@@ -186,10 +197,8 @@ function addThought(fish) {
     
     thoughtEntry.textContent = `[${time}] ${fish.thought}`;
     
-    // Add new thought at the top
     thoughtLog.insertBefore(thoughtEntry, thoughtLog.firstChild);
     
-    // Remove old thoughts if too many
     while (thoughtLog.children.length > MAX_THOUGHTS) {
         thoughtLog.removeChild(thoughtLog.lastChild);
     }
@@ -495,15 +504,47 @@ document.querySelector('.data-panel').prepend(devPanel);
 
 function updateDevPanel(thought) {
     const devThoughts = document.getElementById('devThoughts');
-    if (thought && devThoughts) {
-        const thoughtElem = document.createElement('div');
-        thoughtElem.className = 'dev-thought';
+    if (!thought || !devThoughts) return;
+    
+    // Create a unique key for the thought by combining timestamp and content
+    const thoughtKey = `${thought.slice(0, 50)}`;  // Use first 50 chars as key
+    
+    // Don't add if this exact thought exists
+    if (Array.from(devThoughts.children).some(elem => 
+        elem.getAttribute('data-thought') === thoughtKey)) {
+        return;
+    }
+    
+    // Clear panel if it's a report (longer thought)
+    if (thought.length > 50) {
+        devThoughts.innerHTML = '';
+    }
+    
+    const thoughtElem = document.createElement('div');
+    thoughtElem.className = 'dev-thought';
+    thoughtElem.setAttribute('data-thought', thoughtKey);
+    
+    // Add timestamp for regular observations
+    if (thought.length <= 50) {
+        const time = new Date().toLocaleTimeString('en-US', { 
+            hour12: false, 
+            hour: '2-digit', 
+            minute: '2-digit'
+        });
+        thoughtElem.textContent = `[${time}] ${thought}`;
+    } else {
         thoughtElem.textContent = thought;
-        
-        devThoughts.prepend(thoughtElem);
-        if (devThoughts.children.length > 5) {
-            devThoughts.removeChild(devThoughts.lastChild);
-        }
+    }
+    
+    devThoughts.insertBefore(thoughtElem, devThoughts.firstChild);
+    
+    // Keep only last 3 observations (not reports)
+    const observations = Array.from(devThoughts.children).filter(
+        elem => elem.textContent.includes('[')
+    );
+    
+    if (observations.length > 3) {
+        observations[3].remove();
     }
 }
 
@@ -514,16 +555,37 @@ function drawDevThought(ctx, blob) {
     
     // Position above blob fish
     const bubbleX = blob.x;
-    const bubbleY = blob.y - 60;  // Higher than regular fish
+    const bubbleY = blob.y - 60;
+    
+    // Different styling for reports vs quick thoughts
+    const isReport = blob.thought.length > 50;
     
     // Setup text style
-    ctx.font = 'bold 14px Arial';
-    const metrics = ctx.measureText(blob.thought);
-    const padding = 10;
+    ctx.font = isReport ? '10px Arial' : 'bold 14px Arial';
     
-    // Bubble dimensions
-    const bubbleWidth = metrics.width + padding * 2;
-    const bubbleHeight = 25;
+    // Word wrap for reports
+    const maxWidth = 200;  // Maximum width for text
+    const lineHeight = isReport ? 12 : 20;
+    const words = blob.thought.split(' ');
+    let lines = [];
+    let currentLine = words[0];
+    
+    // Word wrap
+    for (let i = 1; i < words.length; i++) {
+        const testLine = currentLine + ' ' + words[i];
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxWidth) {
+            lines.push(currentLine);
+            currentLine = words[i];
+        } else {
+            currentLine = testLine;
+        }
+    }
+    lines.push(currentLine);
+    
+    // Calculate bubble dimensions
+    const bubbleWidth = maxWidth + 20;
+    const bubbleHeight = lines.length * lineHeight + 20;
     
     // Draw bubble with gradient
     const gradient = ctx.createLinearGradient(
@@ -562,7 +624,12 @@ function drawDevThought(ctx, blob) {
     ctx.fillStyle = '#333';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(blob.thought, bubbleX, bubbleY);
+    
+    // Draw each line
+    lines.forEach((line, i) => {
+        const y = bubbleY - (lines.length * lineHeight)/2 + (i + 0.5) * lineHeight;
+        ctx.fillText(line, bubbleX, y);
+    });
     
     ctx.restore();
 }
