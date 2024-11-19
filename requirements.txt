@@ -2,3 +2,5 @@ fastapi
 uvicorn
 websockets
 numpy
+anthropic
+python-dotenv

@@ -67,6 +67,66 @@
             background: cyan;
             transform-origin: left center;
         }
+        .thought-log {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            max-width: 1160px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-family: monospace;
+            color: #fff;
+            max-height: 120px;
+            overflow-y: auto;
+            backdrop-filter: blur(5px);
+            z-index: 1000;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .thought-entry {
+            margin: 5px 0;
+            font-size: 14px;
+            opacity: 0.8;
+            transition: opacity 0.3s;
+            padding: 3px 0;
+        }
+        
+        .thought-entry:first-child {
+            color: #4ADE80;
+            opacity: 1;
+            border-bottom: 1px solid rgba(74, 222, 128, 0.2);
+            padding-bottom: 8px;
+        }
+        
+        .dev-panel {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #FAB0B0;
+        }
+        
+        .dev-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #FAB0B0;
+        }
+        
+        .dev-thought {
+            font-size: 12px;
+            padding: 5px 0;
+            border-bottom: 1px solid #333;
+            opacity: 0.8;
+        }
+        
+        .dev-thought:first-child {
+            color: #FAB0B0;
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -93,163 +153,7 @@
             <div id="fishData"></div>
         </div>
     </div>
-    <script>
-        const canvas = document.getElementById('fishTank');
-        const ctx = canvas.getContext('2d');
-        const fishData = document.getElementById('fishData');
-        const globalStats = document.getElementById('globalStats');
-        const fishCount = document.getElementById('fishCount');
-        const ws = new WebSocket('ws://localhost:8000/ws');
-
-        function createVectorDisplay(vx, vy) {
-            const magnitude = Math.sqrt(vx * vx + vy * vy);
-            const angle = Math.atan2(vy, vx);
-            const length = Math.min(magnitude * 10, 25);
-
-            return `
-                <div class="vector-display">
-                    <div class="vector-arrow" style="
-                        width: ${length}px;
-                        transform: rotate(${angle}rad);
-                        background: rgb(${Math.min(255, magnitude * 50)},
-                                     ${Math.max(0, 255 - magnitude * 50)},
-                                     255);
-                    "></div>
-                </div>
-            `;
-        }
-
-        function updateDataPanel(fish, foodCount) {
-            globalStats.innerHTML = `
-                Population: ${fish.length}<br>
-                Avg Energy: ${(fish.reduce((sum, f) => sum + f.energy, 0) / fish.length).toFixed(2)}<br>
-                Active Food: ${foodCount}
-            `;
-
-            fishCount.innerHTML = `Supply: ${fish.length}`;
-
-            fishData.innerHTML = fish.map(f => `
-                <div class="fish-data" style="border-left: 4px solid rgb(${f.color.map(c => c * 255).join(',')})">
-                    Fish #${f.id}<br>
-                    Position: (${f.x.toFixed(1)}, ${f.y.toFixed(1)})<br>
-                    Energy: ${f.energy.toFixed(1)}<br>
-                    Velocity: ${createVectorDisplay(f.vx, f.vy)}
-                    Speed: ${Math.sqrt(f.vx * f.vx + f.vy * f.vy).toFixed(2)}
-                </div>
-            `).join('');
-        }
-
-        function drawFish(fish) {
-            ctx.save();
-            ctx.translate(fish.x, fish.y);
-
-            const direction = fish.vx >= 0 ? 1 : -1;
-            ctx.scale(direction, 1);
-
-            // Shadow for depth
-            ctx.shadowColor = 'rgba(0,0,0,0.2)';
-            ctx.shadowBlur = 10;
-
-            // Body gradient
-            const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 25);
-            gradient.addColorStop(0, `rgba(${fish.color.map(c => c * 255).join(',')}, 1)`);
-            gradient.addColorStop(1, `rgba(${fish.color.map(c => c * 255 * 0.7).join(',')}, 1)`);
-            ctx.fillStyle = gradient;
-
-            // Main body
-            ctx.beginPath();
-            ctx.moveTo(-20, 0);
-            ctx.quadraticCurveTo(0, -15, 20, 0);
-            ctx.quadraticCurveTo(0, 15, -20, 0);
-            ctx.fill();
-
-            // Tail
-            ctx.save();
-            ctx.translate(-20, 0);
-            ctx.rotate(fish.tail_angle);
-            ctx.beginPath();
-            ctx.moveTo(0, 0);
-            ctx.quadraticCurveTo(-15, -10, -20, 0);
-            ctx.quadraticCurveTo(-15, 10, 0, 0);
-            ctx.fill();
-            ctx.restore();
-
-            // Dorsal fin
-            ctx.beginPath();
-            ctx.moveTo(0, -15);
-            ctx.quadraticCurveTo(5, -20, 10, -15);
-            ctx.quadraticCurveTo(5, -10, 0, -15);
-            ctx.fill();
-
-            // Eye
-            ctx.fillStyle = 'white';
-            ctx.beginPath();
-            ctx.arc(10, -5, 3, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = 'black';
-            ctx.beginPath();
-            ctx.arc(11, -5, 1.5, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Pectoral fin with animation
-            ctx.save();
-            ctx.translate(0, 0);
-            ctx.rotate(Math.sin(Date.now() / 200) * 0.2);
-            ctx.beginPath();
-            ctx.moveTo(0, 0);
-            ctx.quadraticCurveTo(5, 5, 0, 10);
-            ctx.quadraticCurveTo(-5, 5, 0, 0);
-            ctx.fill();
-            ctx.restore();
-
-            ctx.restore();
-        }
-
-        canvas.onclick = (e) => {
-            const rect = canvas.getBoundingClientRect();
-            ws.send(JSON.stringify({
-                type: 'add_food',
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top
-            }));
-        };
-
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Ambient particles
-            for(let i = 0; i < 50; i++) {
-                ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                ctx.beginPath();
-                ctx.arc(
-                    (Date.now()/20 + i * 100) % canvas.width,
-                    (Math.sin((Date.now() + i * 1000)/1000) * 50) + i * 16,
-                    1,
-                    0,
-                    Math.PI * 2
-                );
-                ctx.fill();
-            }
-
-            // Draw food with glow
-            data.food.forEach(food => {
-                ctx.save();
-                ctx.shadowColor = '#4ADE80';
-                ctx.shadowBlur = 10;
-                ctx.fillStyle = '#4ADE80';
-                ctx.beginPath();
-                ctx.arc(food.x, food.y, 3, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.restore();
-            });
-
-            // Draw fish
-            data.fish.forEach(drawFish);
-
-            // Update data panel
-            updateDataPanel(data.fish, data.food.length);
-        };
-    </script>
+    <div id="thoughtLog" class="thought-log"></div>
+    <script src="/static/script.js"></script>
 </body>
 </html>
